@@ -35,7 +35,7 @@ export default function Home() {
   return (
     <Container id="home">
       <Content>
-        <Image src="/images/app/logo.webp" alt="Logo de JDR Réunion" width={120} height={120} />
+        <Image src="/images/logo.webp" alt="Logo de JDR Réunion" width={120} height={120} />
         <Title>JDR Réunion</Title>
         <Subtitle>JDR Réunion est une organisation dédiée aux jeux de rôle, aux tournois, aux soirées jeux et à l&apos;improvisation à La Réunion.</Subtitle>
         <Subtitle>Notre mission est de créer une communauté immersive où chacun peut explorer sa créativité et vivre des aventures uniques.</Subtitle>
