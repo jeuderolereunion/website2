@@ -547,9 +547,11 @@ async function createEvent() {
         <HeroSubtitle>{cat.subtitle}</HeroSubtitle>
       </Hero>
      <Link href="/proposer-evenement">
-  <RegisterBtn as="span">
+  <div style={{ textAlign: "center", marginBottom: "2rem" }}>
+  <Link href="/proposer-evenement">
     ➕ Proposer un événement
-  </RegisterBtn>
+  </Link>
+</div>
 </Link>
       <FiltersRow>
         {(["all", "upcoming", "past"] as const).map(f => (

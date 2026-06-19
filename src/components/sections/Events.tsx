@@ -2,7 +2,7 @@
 
 import styled from "styled-components";
 import { Container } from '@/components/Container';
-
+import Link from "next/link";
 const Content = styled.div`
   max-width: 900px;
   padding: 0 1.5rem;
@@ -14,7 +14,23 @@ const Title = styled.h2`
   font-size: clamp(2rem, 4vw, 3rem);
   margin: 0 0 2rem;
 `;
+const EventButton = styled(Link)`
+  display: inline-block;
+  margin-top: 0.75rem;
+  padding: 0.4rem 0.8rem;
+  border-radius: 6px;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.8rem;
 
+  color: white;
+  background: rgba(120, 80, 255, 0.4);
+  border: 1px solid rgba(160, 120, 255, 0.5);
+
+  &:hover {
+    background: rgba(120, 80, 255, 0.6);
+  }
+`;
 const Grid = styled.div`
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -63,12 +79,14 @@ const events = [
   {
     icon: '🎲',
     title: 'Soirées JDR',
+    slug: "soirees-jdr",
     description:
       'Sessions de jeu de rôle régulières ouvertes à tous les niveaux. Découvrez de nouveaux univers et maîtres de jeu.',
   },
   {
     icon: '🏆',
     title: 'Tournois',
+    slug: "tournois",
     description:
       "Compétitions amicales entre joueurs. Testez vos compétences dans des scénarios conçus pour le défi.",
   },
@@ -97,6 +115,10 @@ export default function Events() {
               <CardIcon>{event.icon}</CardIcon>
               <CardTitle>{event.title}</CardTitle>
               <CardDescription>{event.description}</CardDescription>
+
+<EventButton href={`/evenements/${event.slug}`}>
+  Voir les événements →
+</EventButton>
             </Card>
           ))}
         </Grid>

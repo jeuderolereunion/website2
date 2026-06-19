@@ -17,6 +17,7 @@ export default function Page() {
         <AppLayoutElement>
           <Events />
         </AppLayoutElement>
+        
         <AppLayoutElement>
           <Community />
         </AppLayoutElement>

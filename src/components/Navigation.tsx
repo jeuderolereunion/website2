@@ -78,8 +78,10 @@ export default function Navigation() {
       <Links>
         <li><NavLink onClick={() => scrollTo('home')}>Accueil</NavLink></li>
         <li><NavLink onClick={() => scrollTo('events')}>Événements</NavLink></li>
+        <li><NavLink onClick={() => scrollTo('about')}>Ressources</NavLink></li>
         <li><NavLink onClick={() => scrollTo('community')}>Communauté</NavLink></li>
         <li><NavLink onClick={() => scrollTo('about')}>À propos</NavLink></li>
+        <li><NavLink onClick={() => scrollTo('about')}>Se connecter</NavLink></li>
       </Links>
     </Nav>
   );
