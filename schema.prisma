@@ -1,0 +1,87 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String
+  email         String    @unique
+  password      String
+  role          Role      @default(JOUEUR)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  tablesCreees  Table[]        @relation("MJTables")
+  inscriptions  Inscription[]
+
+  @@map("users")
+}
+
+model Table {
+  id            String    @id @default(cuid())
+  titre         String
+  jeu           String
+  description   String    @db.Text
+  lieu          String
+  dateHeure     DateTime
+  placesTotal   Int
+  niveauRequis  Niveau    @default(TOUS_NIVEAUX)
+  statut        Statut    @default(OUVERTE)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  mjId          String
+  mj            User          @relation("MJTables", fields: [mjId], references: [id], onDelete: Cascade)
+  inscriptions  Inscription[]
+
+  @@map("tables")
+}
+
+model Inscription {
+  id        String            @id @default(cuid())
+  statut    StatutInscription @default(EN_ATTENTE)
+  createdAt DateTime          @default(now())
+
+  // Relations
+  userId    String
+  tableId   String
+  user      User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  table     Table @relation(fields: [tableId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, tableId])
+  @@map("inscriptions")
+}
+
+enum Role {
+  JOUEUR
+  MJ
+  ADMIN
+}
+
+enum Niveau {
+  DEBUTANT
+  INTERMEDIAIRE
+  CONFIRME
+  TOUS_NIVEAUX
+}
+
+enum Statut {
+  OUVERTE
+  COMPLETE
+  ANNULEE
+}
+
+enum StatutInscription {
+  EN_ATTENTE
+  CONFIRMEE
+  REFUSEE
+}
