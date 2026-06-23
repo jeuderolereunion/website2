@@ -3,6 +3,8 @@
 import styled from "styled-components";
 import { useEffect, useState } from "react";
 import { db } from "@/lib/firebase";
+import { auth } from "@/lib/firebase";
+import { onAuthStateChanged, User } from "firebase/auth";
 import { collection, getDocs } from "firebase/firestore";
 import Navigation from "@/components/Navigation";
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -299,6 +301,7 @@ const Loading = styled.p`
 // ─── Composant principal ──────────────────────────────────────────────────────
 
 export default function RessourcesPage() {
+    const [user, setUser] = useState<User | null>(null);
   const [ressources, setRessources] = useState<Ressource[]>([]);
   const [loading, setLoading] = useState(true);
   const [filtre, setFiltre] = useState<TypeRessource | "tous">("tous");
@@ -321,6 +324,14 @@ export default function RessourcesPage() {
     }
     charger();
   }, []);
+
+  useEffect(() => {
+  const unsub = onAuthStateChanged(auth, (firebaseUser) => {
+    setUser(firebaseUser);
+  });
+
+  return () => unsub();
+}, []);
 
   // Filtrage
   const filtrees = ressources.filter(r => {
@@ -407,14 +418,22 @@ export default function RessourcesPage() {
 
                     <CardMeta>
                       <CardTaille>{r.taille}</CardTaille>
-                      <DlBtn
-                        href={r.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        aria-label={`Télécharger ${r.titre}`}
-                      >
-                        ↓ PDF
-                      </DlBtn>
+                      {user ? (
+  <DlBtn
+    href={r.url}
+    target="_blank"
+    rel="noopener noreferrer"
+  >
+    ↓ PDF
+  </DlBtn>
+) : (
+  <DlBtn
+  as="button"
+  disabled
+>
+  🔒 Connectez-vous pour télécharger
+</DlBtn>
+)}
                     </CardMeta>
                   </Card>
                 ))}

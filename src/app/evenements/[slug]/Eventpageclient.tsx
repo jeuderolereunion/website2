@@ -1,28 +1,35 @@
 "use client";
+
 import { useState, useEffect } from "react";
 import styled, { keyframes } from "styled-components";
 import Link from "next/link";
-import { db } from "@/lib/firebase";
+import { usePathname } from "next/navigation";
+import { db, auth } from "@/lib/firebase";
+import { onAuthStateChanged, User } from "firebase/auth";
 import { runTransaction } from "firebase/firestore";
+import Navigation from "@/components/Navigation";
 
 import {
   collection,
   query,
   where,
-  orderBy,
   onSnapshot,
   addDoc,
   doc,
-  updateDoc,
+  getDoc,
   increment,
   getDocs,
   serverTimestamp,
 } from "firebase/firestore";
 
+// ─── Animations ───────────────────────────────────────────────────────────────
+
 const fadeUp = keyframes`
   from { opacity: 0; transform: translateY(18px); }
   to   { opacity: 1; transform: translateY(0); }
 `;
+
+// ─── Styled components ────────────────────────────────────────────────────────
 
 const Page = styled.main`
   min-height: 100vh;
@@ -34,14 +41,14 @@ const Page = styled.main`
 
 const Hero = styled.section`
   position: relative;
-  padding: 5rem 1.5rem 3.5rem;
+  padding: 6rem 1.5rem 3.5rem;
   text-align: center;
   overflow: hidden;
   &::before {
     content: '';
     position: absolute;
     inset: 0;
-    background: radial-gradient(ellipse 70% 50% at 50% 0%, rgba(120, 80, 255, 0.18) 0%, transparent 70%);
+    background: radial-gradient(ellipse 70% 50% at 50% 0%, rgba(120,80,255,0.18) 0%, transparent 70%);
     pointer-events: none;
   }
 `;
@@ -81,6 +88,35 @@ const HeroSubtitle = styled.p`
   margin: 0 auto;
   line-height: 1.6;
   animation: ${fadeUp} 0.45s ease 0.1s both;
+`;
+
+const ProposeLink = styled(Link)`
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 auto 2rem;
+  padding: 0.5rem 1.25rem;
+  border-radius: 999px;
+  border: 1px solid rgba(160,120,255,0.35);
+  background: rgba(120,80,255,0.12);
+  color: #c8a8ff;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: all 150ms;
+  width: fit-content;
+  display: block;
+  text-align: center;
+
+  &:hover {
+    background: rgba(120,80,255,0.25);
+    border-color: rgba(160,120,255,0.6);
+  }
+`;
+
+const ProposeRow = styled.div`
+  text-align: center;
+  margin-bottom: 2rem;
 `;
 
 const FiltersRow = styled.div`
@@ -125,6 +161,10 @@ const Grid = styled.div`
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 1rem;
   margin-bottom: 3rem;
+
+  @media (max-width: 400px) {
+    grid-template-columns: 1fr;
+  }
 `;
 
 const Card = styled.article`
@@ -140,6 +180,9 @@ const Card = styled.article`
     transform: translateY(-3px);
     background: rgba(255,255,255,0.08);
     border-color: rgba(160,120,255,0.3);
+  }
+  @media (hover: none) {
+    &:hover { transform: none; }
   }
 `;
 
@@ -225,12 +268,14 @@ const LoadingState = styled.div`
   font-size: 0.9rem;
 `;
 
+// ── Modal ─────────────────────────────────────────────────────────────────────
+
 const Overlay = styled.div`
   position: fixed;
   inset: 0;
   background: rgba(0,0,0,0.7);
   backdrop-filter: blur(4px);
-  z-index: 100;
+  z-index: 200;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -259,33 +304,50 @@ const ModalSubtitle = styled.p`
   margin: 0 0 1.5rem;
 `;
 
-const Field = styled.div`
-  margin-bottom: 1rem;
+const UserInfoBox = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: rgba(120,80,255,0.1);
+  border: 1px solid rgba(160,120,255,0.2);
+  border-radius: 10px;
+  margin-bottom: 1.25rem;
 `;
 
-const Label = styled.label`
-  display: block;
-  font-size: 0.78rem;
+const UserAvatar = styled.div`
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(120,80,255,0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  flex-shrink: 0;
+`;
+
+const UserDetails = styled.div`
+  flex: 1;
+  min-width: 0;
+`;
+
+const UserName = styled.p`
+  font-size: 0.88rem;
   font-weight: 600;
-  color: rgba(255,255,255,0.6);
-  margin-bottom: 0.35rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 `;
 
-const Input = styled.input`
-  width: 100%;
-  padding: 0.6rem 0.9rem;
-  background: rgba(255,255,255,0.06);
-  border: 1px solid rgba(255,255,255,0.12);
-  border-radius: 8px;
-  color: #fff;
-  font-size: 0.9rem;
-  outline: none;
-  box-sizing: border-box;
-  transition: border-color 150ms;
-  &:focus { border-color: rgba(160,120,255,0.6); }
-  &::placeholder { color: rgba(255,255,255,0.25); }
+const UserEmail = styled.p`
+  font-size: 0.78rem;
+  color: rgba(255,255,255,0.45);
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 `;
 
 const ModalActions = styled.div`
@@ -327,6 +389,8 @@ const SuccessMsg = styled.div`
   font-size: 0.95rem;
 `;
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
 type EventDoc = {
   id: string;
   titre: string;
@@ -335,191 +399,172 @@ type EventDoc = {
   places: number;
   inscrits: number;
   niveau: string;
-  organisateur : string, 
+  organisateur: string;
   description: string;
   categorie: string;
 };
 
-const categories: Record<string, { icon: string; title: string; subtitle: string }> = {
-  "soirees-jdr": { icon: "🎲", title: "Soirées JDR", subtitle: "Sessions de jeu de rôle régulières ouvertes à tous les niveaux." },
-  "tournois": { icon: "🏆", title: "Tournois", subtitle: "Compétitions amicales entre joueurs pour tester vos compétences." },
-  "soirees-jeux": { icon: "🃏", title: "Soirées Jeux", subtitle: "Jeux de société et de plateau pour varier les plaisirs." },
-  "initiations": { icon: "📖", title: "Initiations", subtitle: "Ateliers pour découvrir le jeu de rôle de zéro, dans un cadre bienveillant." },
+type UserProfile = {
+  pseudo: string;
+  email: string;
 };
 
+// ─── Catégories ───────────────────────────────────────────────────────────────
+
+const categories: Record<string, { icon: string; title: string; subtitle: string }> = {
+  "soirees-jdr":  { icon: "🎲", title: "Soirées JDR",   subtitle: "Sessions de jeu de rôle régulières ouvertes à tous les niveaux." },
+  "tournois":     { icon: "🏆", title: "Tournois",       subtitle: "Compétitions amicales entre joueurs pour tester vos compétences." },
+  "soirees-jeux": { icon: "🃏", title: "Soirées Jeux",   subtitle: "Jeux de société et de plateau pour varier les plaisirs." },
+  "initiations":  { icon: "📖", title: "Initiations",    subtitle: "Ateliers pour découvrir le jeu de rôle de zéro, dans un cadre bienveillant." },
+};
+
+// ─── Composant ────────────────────────────────────────────────────────────────
+
 export default function EventPageClient({ slug }: { slug: string }) {
-  const cat = categories[slug];
-  const [events, setEvents] = useState<EventDoc[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<"all" | "upcoming" | "past">("all");
+  const cat      = categories[slug];
+  const pathname = usePathname();
+
+  const [user, setUser]                   = useState<User | null>(null);
+  const [userProfile, setUserProfile]     = useState<UserProfile | null>(null);
+  const [authLoading, setAuthLoading]     = useState(true);
+
+  const [events, setEvents]               = useState<EventDoc[]>([]);
+  const [loading, setLoading]             = useState(true);
+  const [filter, setFilter]               = useState<"all" | "upcoming" | "past">("all");
+
   const [selectedEvent, setSelectedEvent] = useState<EventDoc | null>(null);
-  const [form, setForm] = useState({ nom: "", email: "", pseudo: "" });
-  const [submitting, setSubmitting] = useState(false);
-  const [success, setSuccess] = useState(false);
+  const [submitting, setSubmitting]       = useState(false);
+  const [success, setSuccess]             = useState(false);
 
-  const [showCreateModal, setShowCreateModal] = useState(false);
-
-
-
+  // ── Auth + profil ─────────────────────────────────────────────────────────
 
   useEffect(() => {
-  const q = query(collection(db, "evenements"));
+    const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
+      setUser(firebaseUser);
 
-  const unsub = onSnapshot(q, (snap) => {
-    console.log("Documents:", snap.size);
+      if (firebaseUser) {
+        // Récupérer le pseudo depuis Firestore
+        const userSnap = await getDoc(doc(db, "users", firebaseUser.uid));
+        if (userSnap.exists()) {
+          const data = userSnap.data();
+          setUserProfile({
+            pseudo: data.pseudo || "",
+            email:  firebaseUser.email || "",
+          });
+        } else {
+          setUserProfile({ pseudo: "", email: firebaseUser.email || "" });
+        }
+      } else {
+        setUserProfile(null);
+      }
 
-    const data = snap.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }));
+      setAuthLoading(false);
+    });
+    return () => unsub();
+  }, []);
 
-    console.log(data);
+  // ── Chargement événements ─────────────────────────────────────────────────
 
-    setEvents(data as EventDoc[]);
-    setLoading(false);
-  });
+  useEffect(() => {
+    const q = query(collection(db, "evenements"));
+    const unsub = onSnapshot(q, (snap) => {
+      setEvents(snap.docs.map(d => ({ id: d.id, ...d.data() })) as EventDoc[]);
+      setLoading(false);
+    });
+    return () => unsub();
+  }, []);
 
-  return () => unsub();
-}, []);
+  // ── Inscription ───────────────────────────────────────────────────────────
 
-  async function handleSubmit() {
-  if (!selectedEvent || !form.nom || !form.email) {
-    return;
-  }
+  function handleRegisterClick(event: EventDoc) {
+    if (authLoading) return;
 
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-  if (!emailRegex.test(form.email)) {
-    alert("Adresse email invalide");
-    return;
-  }
-
-  setSubmitting(true);
-await runTransaction(db, async (transaction) => {
-  const eventRef = doc(db, "evenements", selectedEvent.id);
-  const eventSnap = await transaction.get(eventRef);
-
-  if (!eventSnap.exists()) {
-    throw new Error("Événement introuvable");
-  }
-
-  const data = eventSnap.data();
-
-  const placesDispo =
-    data.places - (data.inscrits || 0);
-
-  if (placesDispo <= 0) {
-    throw new Error("Événement complet");
-  }
-
-  transaction.update(eventRef, {
-    inscrits: increment(1),
-  });
-});
-  try {
-    // Vérifier si déjà inscrit
-    const existingQuery = query(
-  collection(db, "inscriptions"),
-  where("eventId", "==", selectedEvent.id),
-  where("email", "==", form.email)
-);
-
-const existing = await getDocs(existingQuery);
-
-if (!existing.empty) {
-  alert("Vous êtes déjà inscrit.");
-  return;
-}
-
-    // Vérifier les places restantes
-    const placesDispo =
-      selectedEvent.places - (selectedEvent.inscrits ?? 0);
-
-    if (placesDispo <= 0) {
-      alert("Cet événement est complet.");
-      setSubmitting(false);
+    if (!user) {
+      // Rediriger vers login avec l'URL actuelle en redirect
+      window.location.href = `/login?redirect=${encodeURIComponent(pathname)}`;
       return;
     }
 
-    // Enregistrer l'inscription
-    await addDoc(collection(db, "inscriptions"), {
-      eventId: selectedEvent.id,
-      eventTitle: selectedEvent.titre,
-      categorie: slug,
-      nom: form.nom,
-      email: form.email,
-      pseudo: form.pseudo,
-      createdAt: serverTimestamp(),
-    });
-
-    // Incrémenter le nombre d'inscrits
-    await updateDoc(
-      doc(db, "evenements", selectedEvent.id),
-      {
-        inscrits: increment(1),
-      }
-    );
-
-    // Envoyer le mail
-    const mailResponse = await fetch(
-      "/api/inscription",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          nom: form.nom,
-          email: form.email,
-          eventTitle: selectedEvent.titre,
-          date: selectedEvent.date,
-          time: selectedEvent.heure,
-        }),
-      }
-    );
-
-    if (!mailResponse.ok) {
-      console.warn(
-        "Inscription enregistrée mais email non envoyé."
-      );
-    }
-
-    setSuccess(true);
-
-  } catch (error) {
-    console.error(error);
-    alert(
-      "Une erreur est survenue lors de l'inscription."
-    );
-  } finally {
-    setSubmitting(false);
+    setSelectedEvent(event);
   }
-}
+
+  async function handleSubmit() {
+    if (!selectedEvent || !user || !userProfile) return;
+
+    setSubmitting(true);
+
+    try {
+      // Vérifier si déjà inscrit
+      const existingQuery = query(
+        collection(db, "inscriptions"),
+        where("eventId", "==", selectedEvent.id),
+        where("email",   "==", userProfile.email)
+      );
+      const existing = await getDocs(existingQuery);
+      if (!existing.empty) {
+        alert("Vous êtes déjà inscrit à cet événement.");
+        setSubmitting(false);
+        return;
+      }
+
+      // Transaction pour vérifier les places et incrémenter
+      await runTransaction(db, async (transaction) => {
+        const eventRef  = doc(db, "evenements", selectedEvent.id);
+        const eventSnap = await transaction.get(eventRef);
+        if (!eventSnap.exists()) throw new Error("Événement introuvable");
+
+        const data = eventSnap.data();
+        if ((data.places - (data.inscrits || 0)) <= 0) throw new Error("Événement complet");
+
+        transaction.update(eventRef, { inscrits: increment(1) });
+      });
+
+      // Enregistrer l'inscription
+      await addDoc(collection(db, "inscriptions"), {
+        eventId:    selectedEvent.id,
+        eventTitle: selectedEvent.titre,
+        categorie:  slug,
+        nom:        userProfile.pseudo || userProfile.email,
+        email:      userProfile.email,
+        pseudo:     userProfile.pseudo,
+        userId:     user.uid,
+        createdAt:  serverTimestamp(),
+      });
+
+      // Envoyer l'email de confirmation
+      await fetch("/api/inscription", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nom:        userProfile.pseudo || userProfile.email,
+          email:      userProfile.email,
+          eventTitle: selectedEvent.titre,
+          date:       selectedEvent.date,
+          time:       selectedEvent.heure,
+        }),
+      });
+
+      setSuccess(true);
+
+    } catch (error: any) {
+      console.error(error);
+      alert(error.message || "Une erreur est survenue lors de l'inscription.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   function closeModal() {
     setSelectedEvent(null);
-    setForm({ nom: "", email: "", pseudo: "" });
     setSuccess(false);
   }
-async function createEvent() {
-  try {
-    await addDoc(collection(db, "evenements"), {
-      
-      categorie: slug,
-      inscrits: 0,
-      createdAt: serverTimestamp(),
-    });
 
-    setShowCreateModal(false);
+  // ── Rendu ─────────────────────────────────────────────────────────────────
 
-
-  } catch (error) {
-    console.error(error);
-  }
-}
   if (!cat) {
     return (
       <Page>
+        <Navigation />
         <Hero>
           <BackLink href="/#events">← Retour aux événements</BackLink>
           <HeroTitle>Page introuvable</HeroTitle>
@@ -529,30 +574,32 @@ async function createEvent() {
     );
   }
 
-  const now = new Date().toISOString().split("T")[0];
+  const now      = new Date().toISOString().split("T")[0];
   const filtered = events.filter(e => {
     if (filter === "upcoming") return e.date >= now;
-    if (filter === "past") return e.date < now;
+    if (filter === "past")     return e.date < now;
     return true;
   });
   const upcoming = filtered.filter(e => e.date >= now);
-  const past = filtered.filter(e => e.date < now);
+  const past     = filtered.filter(e => e.date < now);
 
   return (
     <Page>
+      <Navigation />
+
       <Hero>
         <BackLink href="/#events">← Tous les événements</BackLink>
         <HeroIcon>{cat.icon}</HeroIcon>
         <HeroTitle>{cat.title}</HeroTitle>
         <HeroSubtitle>{cat.subtitle}</HeroSubtitle>
       </Hero>
-     <Link href="/proposer-evenement">
-  <div style={{ textAlign: "center", marginBottom: "2rem" }}>
-  <Link href="/proposer-evenement">
-    ➕ Proposer un événement
-  </Link>
-</div>
-</Link>
+
+      <ProposeRow>
+        <ProposeLink href="/proposer-evenement">
+          ➕ Proposer un événement
+        </ProposeLink>
+      </ProposeRow>
+
       <FiltersRow>
         {(["all", "upcoming", "past"] as const).map(f => (
           <FilterBtn key={f} $active={filter === f} onClick={() => setFilter(f)}>
@@ -562,17 +609,19 @@ async function createEvent() {
       </FiltersRow>
 
       <Section>
-        {loading && <LoadingState>Chargement des événements...</LoadingState>}
+        {loading && <LoadingState>Chargement des événements…</LoadingState>}
+
         {!loading && filtered.length === 0 && (
           <EmptyState>Aucun événement pour le moment. Revenez bientôt !</EmptyState>
         )}
+
         {!loading && upcoming.length > 0 && (
           <>
             <SectionLabel>À venir</SectionLabel>
             <Grid>
               {upcoming.map((event, i) => {
                 const placesDispo = event.places - (event.inscrits ?? 0);
-                const complet = placesDispo <= 0;
+                const complet     = placesDispo <= 0;
                 return (
                   <Card key={event.id} style={{ animationDelay: `${i * 0.06}s` }}>
                     <CardHeader>
@@ -585,8 +634,11 @@ async function createEvent() {
                         <MetaBadge>⭐ {event.niveau}</MetaBadge>
                       </CardMeta>
                       <CardDesc>{event.description}</CardDesc>
-                      <RegisterBtn disabled={complet} onClick={() => !complet && setSelectedEvent(event)}>
-                        {complet ? "Complet" : "S'inscrire →"}
+                      <RegisterBtn
+                        disabled={complet}
+                        onClick={() => !complet && handleRegisterClick(event)}
+                      >
+                        {complet ? "Complet" : user ? "S'inscrire →" : "🔒 Se connecter pour s'inscrire"}
                       </RegisterBtn>
                     </CardBody>
                   </Card>
@@ -595,6 +647,7 @@ async function createEvent() {
             </Grid>
           </>
         )}
+
         {!loading && past.length > 0 && (
           <>
             <SectionLabel>Événements passés</SectionLabel>
@@ -611,7 +664,9 @@ async function createEvent() {
                       <MetaBadge>⭐ {event.niveau}</MetaBadge>
                     </CardMeta>
                     <CardDesc>{event.description}</CardDesc>
-                    <CardDesc>{event.organisateur}</CardDesc>
+                    <CardDesc style={{ color: "rgba(255,255,255,0.35)", fontSize: "0.8rem" }}>
+                      Organisé par {event.organisateur}
+                    </CardDesc>
                   </CardBody>
                 </Card>
               ))}
@@ -620,28 +675,36 @@ async function createEvent() {
         )}
       </Section>
 
+      {/* ── Modal inscription ── */}
       {selectedEvent && (
         <Overlay onClick={closeModal}>
           <Modal onClick={e => e.stopPropagation()}>
             {!success ? (
               <>
                 <ModalTitle>S&apos;inscrire</ModalTitle>
-                <ModalSubtitle>{selectedEvent.titre} · {selectedEvent.date} à {selectedEvent.heure}</ModalSubtitle>
-                <Field>
-                  <Label>Nom *</Label>
-                  <Input placeholder="Jean Dupont" value={form.nom} onChange={e => setForm(f => ({ ...f, nom: e.target.value }))} />
-                </Field>
-                <Field>
-                  <Label>Email *</Label>
-                  <Input type="email" placeholder="jean@exemple.com" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
-                </Field>
-                <Field>
-                  
-                </Field>
+                <ModalSubtitle>
+                  {selectedEvent.titre} · {selectedEvent.date} à {selectedEvent.heure}
+                </ModalSubtitle>
+
+                {/* Infos du compte connecté */}
+                {userProfile && (
+                  <UserInfoBox>
+                    <UserAvatar>🧙</UserAvatar>
+                    <UserDetails>
+                      <UserName>{userProfile.pseudo || "Aventurier"}</UserName>
+                      <UserEmail>{userProfile.email}</UserEmail>
+                    </UserDetails>
+                  </UserInfoBox>
+                )}
+
+                <p style={{ fontSize: "0.85rem", color: "rgba(255,255,255,0.45)", marginBottom: "1.5rem" }}>
+                  Votre inscription sera enregistrée avec ce compte. Un email de confirmation vous sera envoyé.
+                </p>
+
                 <ModalActions>
                   <CancelBtn onClick={closeModal}>Annuler</CancelBtn>
-                  <ConfirmBtn onClick={handleSubmit} disabled={submitting || !form.nom || !form.email}>
-                    {submitting ? "Envoi..." : "Confirmer l'inscription"}
+                  <ConfirmBtn onClick={handleSubmit} disabled={submitting}>
+                    {submitting ? "Envoi…" : "Confirmer l'inscription"}
                   </ConfirmBtn>
                 </ModalActions>
               </>
@@ -651,7 +714,7 @@ async function createEvent() {
                   <div style={{ fontSize: "2.5rem", marginBottom: "0.75rem" }}>🎉</div>
                   <strong>Inscription confirmée !</strong>
                   <p style={{ color: "rgba(255,255,255,0.5)", fontSize: "0.85rem", marginTop: "0.5rem" }}>
-                    On te recontacte à <strong>{form.email}</strong> pour les détails.
+                    Un email a été envoyé à <strong>{userProfile?.email}</strong>.
                   </p>
                 </SuccessMsg>
                 <ModalActions>
@@ -661,9 +724,7 @@ async function createEvent() {
             )}
           </Modal>
         </Overlay>
-        
       )}
     </Page>
-    
   );
 }
