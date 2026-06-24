@@ -12,6 +12,7 @@ import {
 import {
   doc,
   setDoc,
+  getDoc,
   serverTimestamp,
 } from "firebase/firestore";
 import { useRouter } from "next/navigation";
@@ -297,6 +298,22 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
   const [success, setSuccess]                 = useState("");
   const [loading, setLoading]                 = useState(false);
 
+  function translateError(err: any): string {
+    const code = err?.code as string | undefined;
+
+    if (code === "auth/email-already-in-use") return "Cet email est déjà utilisé.";
+    if (code === "auth/invalid-email") return "Adresse email invalide.";
+    if (code === "auth/weak-password") return "Le mot de passe est trop faible.";
+    if (code === "auth/wrong-password" || code === "auth/invalid-credential") return "Email ou mot de passe incorrect.";
+    if (code === "auth/user-not-found") return "Aucun compte associé à cet email.";
+    if (code === "auth/too-many-requests") return "Trop de tentatives. Réessayez plus tard.";
+    if (code === "permission-denied" || err?.message?.includes("permissions")) {
+      return "Impossible de finaliser cette action pour le moment. Contactez le support si le problème persiste.";
+    }
+
+    return err?.message || "Une erreur est survenue. Veuillez réessayer.";
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
@@ -312,43 +329,67 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
 
         const credential = await createUserWithEmailAndPassword(auth, email, password);
 
-        // Email de vérification natif Firebase
-        await sendEmailVerification(credential.user);
+        try {
+          // Email de vérification natif Firebase
+          await sendEmailVerification(credential.user);
 
-        // Email de bienvenue custom (optionnel, via votre API)
-        await fetch("/api/register-email", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, prenom, nom }),
-        });
+          // Email de bienvenue custom (optionnel, via votre API)
+          await fetch("/api/register-email", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, prenom, nom }),
+          });
 
-        await setDoc(doc(db, "users", credential.user.uid), {
-          uid: credential.user.uid,
-          prenom,
-          nom,
-          pseudo: `${prenom} ${nom}`,
-          email,
-          // droits : "mj" peut créer des événements/parties ET s'inscrire
-          // "joueur" peut uniquement s'inscrire aux parties
-          role,
-          isMJ: role === "mj",
-          createdAt: serverTimestamp(),
-          avatar: "",
-          bio: "",
-          emailVerified: false,
-        });
+          await setDoc(doc(db, "users", credential.user.uid), {
+            uid: credential.user.uid,
+            prenom,
+            nom,
+            pseudo: `${prenom} ${nom}`,
+            email,
+            // droits : "mj" peut créer des événements/parties ET s'inscrire
+            // "joueur" peut uniquement s'inscrire aux parties
+            role,
+            isMJ: role === "mj",
+            // Le compte doit être validé par un admin avant de devenir "active"
+            status: "pending",
+            createdAt: serverTimestamp(),
+            avatar: "",
+            bio: "",
+            emailVerified: false,
+          });
+        } catch (innerErr) {
+          // Rollback : si une étape échoue après la création du compte Auth,
+          // on supprime ce compte fantôme pour libérer l'email pour un nouvel essai.
+          await credential.user.delete().catch(() => {});
+          throw innerErr;
+        }
 
         setSuccess("ok");
         await signOut(auth);
-        setTimeout(() => router.push("/login"), 5000);
+        setTimeout(() => router.push("/login"), 6000);
 
       } else {
-        await signInWithEmailAndPassword(auth, email, password);
+        const credential = await signInWithEmailAndPassword(auth, email, password);
+
+        const userSnap = await getDoc(doc(db, "users", credential.user.uid));
+
+        if (userSnap.exists() && userSnap.data().status === "pending") {
+          await signOut(auth);
+          throw new Error(
+            "Votre compte est en attente de validation par un administrateur. Vous recevrez un accès dès qu'il sera validé."
+          );
+        }
+
+        if (userSnap.exists() && userSnap.data().status === "suspended") {
+          await signOut(auth);
+          throw new Error("Votre compte a été suspendu. Contactez un administrateur.");
+        }
+
         router.push(redirectTo);
       }
 
     } catch (err: any) {
-      setError(err.message || "Une erreur est survenue.");
+      setError(translateError(err));
     } finally {
       setLoading(false);
     }
@@ -371,7 +412,8 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
           <SuccessBox>
             <h3>🎲 Bienvenue sur JDR Réunion !</h3>
             <p>Votre compte a été créé avec succès.</p>
-            <p>Un email de vérification vous a été envoyé, cliquez sur le lien pour confirmer votre adresse.</p>
+            <p>Un administrateur doit valider votre inscription avant que vous puissiez vous connecter.</p>
+            <p>Un email de vérification vous a aussi été envoyé.</p>
             <p>Redirection vers la connexion dans quelques secondes…</p>
           </SuccessBox>
         ) : (

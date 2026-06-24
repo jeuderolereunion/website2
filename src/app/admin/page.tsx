@@ -12,6 +12,9 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  updateDoc,
+  query,
+  where,
   serverTimestamp,
 } from "firebase/firestore";
 
@@ -28,6 +31,8 @@ type Proposition = {
   places: number;
   organisateur: string;
   email: string;
+  image?: string;
+  
 };
 
 type TypeRessource = "regles" | "fiche" | "carte" | "bestiaire" | "scenario";
@@ -39,6 +44,16 @@ type Ressource = {
   univers: string;
   taille: string;
   url: string;
+};
+
+type PendingUser = {
+  id: string;
+  prenom?: string;
+  nom?: string;
+  pseudo?: string;
+  email: string;
+  role: string;
+  createdAt?: any;
 };
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -110,10 +125,12 @@ const Tabs = styled.div`
   border: 1px solid rgba(255,255,255,0.08);
   border-radius: 12px;
   padding: 0.35rem;
+  flex-wrap: wrap;
 `;
 
 const Tab = styled.button<{ $active: boolean }>`
   flex: 1;
+  min-width: 120px;
   padding: 0.65rem 1rem;
   border-radius: 9px;
   border: none;
@@ -143,7 +160,7 @@ const Badge = styled.span`
   padding: 1px 7px;
 `;
 
-// ── Événements ────────────────────────────────────────────────────────────────
+// ── Événements / Comptes (grille commune) ─────────────────────────────────────
 
 const Grid = styled.div`
   max-width: 1100px;
@@ -430,6 +447,16 @@ const TypePill = styled.span`
   flex-shrink: 0;
 `;
 
+const RolePill = styled.span<{ $mj?: boolean }>`
+  font-size: 0.7rem;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: ${p => p.$mj ? "rgba(255,180,80,0.15)" : "rgba(120,80,255,0.15)"};
+  color: ${p => p.$mj ? "rgba(255,200,120,1)" : "rgba(180,150,255,1)"};
+  white-space: nowrap;
+  flex-shrink: 0;
+`;
+
 const LinkBtn = styled.a`
   padding: 0.35rem 0.65rem;
   border-radius: 8px;
@@ -476,7 +503,7 @@ const Loading = styled.p`
 export default function AdminPage() {
   const [authorized, setAuthorized]     = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
-  const [onglet, setOnglet]             = useState<"evenements" | "ressources">("evenements");
+  const [onglet, setOnglet]             = useState<"evenements" | "ressources" | "comptes">("comptes");
 
   // ── État événements ────────────────────────────────────────────────────────
   const [propositions, setPropositions]   = useState<Proposition[]>([]);
@@ -489,6 +516,10 @@ export default function AdminPage() {
   const [submitting, setSubmitting]       = useState(false);
   const [message, setMessage]             = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
+  // ── État comptes en attente ───────────────────────────────────────────────
+  const [pendingUsers, setPendingUsers]   = useState<PendingUser[]>([]);
+  const [loadingUsers, setLoadingUsers]   = useState(true);
+
   // ── Auth ──────────────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -497,17 +528,18 @@ export default function AdminPage() {
 
       const userSnap = await getDoc(doc(db, "users", user.uid));
 
-if (
-  !userSnap.exists() ||
-  userSnap.data().role !== "admin"
-) {
-  window.location.href = "/";
-  return;
-}
+      if (
+        !userSnap.exists() ||
+        userSnap.data().role !== "admin"
+      ) {
+        window.location.href = "/";
+        return;
+      }
       setAuthorized(true);
       setCheckingAuth(false);
       chargerPropositions();
       chargerRessources();
+      chargerComptesEnAttente();
     });
     return () => unsub();
   }, []);
@@ -528,6 +560,38 @@ if (
     setLoadingRes(false);
   }
 
+  async function chargerComptesEnAttente() {
+    setLoadingUsers(true);
+    const snap = await getDocs(
+      query(collection(db, "users"), where("status", "==", "pending"))
+    );
+    setPendingUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })) as PendingUser[]);
+    setLoadingUsers(false);
+  }
+
+  // ── Actions comptes ───────────────────────────────────────────────────────
+
+  async function validerCompte(userId: string) {
+    try {
+      await updateDoc(doc(db, "users", userId), { status: "active" });
+      setPendingUsers(prev => prev.filter(u => u.id !== userId));
+    } catch (err) {
+      console.error(err);
+      alert("Erreur lors de la validation du compte.");
+    }
+  }
+
+  async function refuserCompte(userId: string) {
+    if (!confirm("Refuser et supprimer ce compte ? Cette action est irréversible côté Firestore (le compte d'authentification devra être supprimé séparément).")) return;
+    try {
+      await deleteDoc(doc(db, "users", userId));
+      setPendingUsers(prev => prev.filter(u => u.id !== userId));
+    } catch (err) {
+      console.error(err);
+      alert("Erreur lors du refus du compte.");
+    }
+  }
+
   // ── Actions événements ────────────────────────────────────────────────────
 
   async function accepterEvenement(event: Proposition) {
@@ -541,6 +605,8 @@ if (
         niveau: event.niveau,
         places: event.places,
         inscrits: 0,
+        image: event.image || "",
+        mjId: (event as any).mjId || null,
       });
       await deleteDoc(doc(db, "propositions_evenements", event.id));
       chargerPropositions();
@@ -583,11 +649,29 @@ if (
     }
   }
 
-  async function supprimerRessource(id: string, titre: string) {
-    if (!confirm(`Supprimer "${titre}" ?`)) return;
-    await deleteDoc(doc(db, "ressources", id));
-    chargerRessources();
+  async function supprimerRessource(
+  id: string,
+  titre: string
+) {
+  if (!confirm(`Supprimer "${titre}" ?`)) {
+    return;
   }
+
+  try {
+    await deleteDoc(
+      doc(db, "ressources", id)
+    );
+
+    setRessources((prev) =>
+      prev.filter((r) => r.id !== id)
+    );
+
+    alert("✅ Ressource supprimée");
+  } catch (error) {
+    console.error(error);
+    alert("❌ Erreur lors de la suppression");
+  }
+}
 
   // ── Rendu ─────────────────────────────────────────────────────────────────
 
@@ -599,10 +683,17 @@ if (
       <Navigation></Navigation>
       <Hero>
         <Title>⚙️ Administration</Title>
-        <Subtitle>Gestion des événements et des ressources</Subtitle>
+        <Subtitle>Gestion des comptes, événements et ressources</Subtitle>
       </Hero>
 
       <Tabs>
+        <Tab
+          $active={onglet === "comptes"}
+          onClick={() => setOnglet("comptes")}
+        >
+          👥 Comptes
+          {pendingUsers.length > 0 && <Badge>{pendingUsers.length}</Badge>}
+        </Tab>
         <Tab
           $active={onglet === "evenements"}
           onClick={() => setOnglet("evenements")}
@@ -619,6 +710,46 @@ if (
         </Tab>
       </Tabs>
 
+      {/* ── Onglet Comptes en attente ── */}
+      {onglet === "comptes" && (
+        <Grid>
+          {loadingUsers && <Loading>Chargement…</Loading>}
+
+          {!loadingUsers && pendingUsers.length === 0 && (
+            <Empty>Aucun compte en attente de validation.</Empty>
+          )}
+
+          {pendingUsers.map(u => (
+            <Card key={u.id}>
+              <CardHeader>
+                <CardTitle>
+                  {u.prenom && u.nom ? `${u.prenom} ${u.nom}` : (u.pseudo || "Utilisateur")}
+                </CardTitle>
+              </CardHeader>
+
+              <CardBody>
+                <Description>{u.email}</Description>
+
+                <MetaRow>
+                  <RolePill $mj={u.role === "mj"}>
+                    {u.role === "mj" ? "🧙 MJ & Joueur" : "🎲 Joueur"}
+                  </RolePill>
+                </MetaRow>
+
+                <Actions>
+                  <ValidateBtn onClick={() => validerCompte(u.id)}>
+                    ✅ Valider
+                  </ValidateBtn>
+                  <RejectBtn onClick={() => refuserCompte(u.id)}>
+                    ❌ Refuser
+                  </RejectBtn>
+                </Actions>
+              </CardBody>
+            </Card>
+          ))}
+        </Grid>
+      )}
+
       {/* ── Onglet Événements ── */}
       {onglet === "evenements" && (
         <Grid>
@@ -633,6 +764,19 @@ if (
               <CardHeader>
                 <CardTitle>{event.titre}</CardTitle>
               </CardHeader>
+
+              {event.image && (
+                <img
+                  src={event.image}
+                  alt={event.titre}
+                  style={{
+                    width: "100%",
+                    height: "160px",
+                    objectFit: "cover",
+                    display: "block",
+                  }}
+                />
+              )}
 
               <CardBody>
                 <Description>{event.description}</Description>

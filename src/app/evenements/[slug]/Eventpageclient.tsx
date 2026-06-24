@@ -186,9 +186,20 @@ const Card = styled.article`
   }
 `;
 
-const CardHeader = styled.div`
+// CardHeader affiche l'image de l'événement en fond si présente,
+// sinon garde le dégradé violet par défaut.
+const CardHeader = styled.div<{ $bgImage?: string }>`
   padding: 1.25rem 1.25rem 0.75rem;
-  background: linear-gradient(135deg, rgba(80,60,160,0.3) 0%, rgba(40,30,80,0.1) 100%);
+  background: ${p =>
+    p.$bgImage
+      ? `linear-gradient(180deg, rgba(13,13,20,0.15) 0%, rgba(13,13,20,0.88) 100%), url(${p.$bgImage})`
+      : "linear-gradient(135deg, rgba(80,60,160,0.3) 0%, rgba(40,30,80,0.1) 100%)"};
+  background-size: cover;
+  background-position: center;
+  min-height: ${p => (p.$bgImage ? "130px" : "auto")};
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
 `;
 
 const CardDate = styled.time`
@@ -290,6 +301,15 @@ const Modal = styled.div`
   width: 100%;
   max-width: 440px;
   animation: ${fadeUp} 0.25s ease both;
+`;
+
+const ModalImage = styled.img`
+  width: 100%;
+  height: 140px;
+  object-fit: cover;
+  border-radius: 10px;
+  margin: 0.25rem 0 1.25rem;
+  display: block;
 `;
 
 const ModalTitle = styled.h2`
@@ -402,6 +422,7 @@ type EventDoc = {
   organisateur: string;
   description: string;
   categorie: string;
+  image?: string;
 };
 
 type UserProfile = {
@@ -489,70 +510,81 @@ export default function EventPageClient({ slug }: { slug: string }) {
   }
 
   async function handleSubmit() {
-    if (!selectedEvent || !user || !userProfile) return;
+  if (!selectedEvent || !user || !userProfile) return;
+  setSubmitting(true);
 
-    setSubmitting(true);
+  try {
+    // Vérifier si déjà inscrit
+    console.log("🔍 Vérification doublon...");
+    const existingQuery = query(
+      collection(db, "inscriptions"),
+      where("eventId", "==", selectedEvent.id),
+      where("userId",  "==", user.uid)
+    );
+    const existing = await getDocs(existingQuery);
+    if (!existing.empty) {
+      alert("Vous êtes déjà inscrit à cet événement.");
+      setSubmitting(false);
+      return;
+    }
 
-    try {
-      // Vérifier si déjà inscrit
-      const existingQuery = query(
-        collection(db, "inscriptions"),
-        where("eventId", "==", selectedEvent.id),
-        where("email",   "==", userProfile.email)
-      );
-      const existing = await getDocs(existingQuery);
-      if (!existing.empty) {
-        alert("Vous êtes déjà inscrit à cet événement.");
-        setSubmitting(false);
-        return;
-      }
+    // Transaction pour vérifier les places et incrémenter
+    console.log("🔄 Transaction...");
+    await runTransaction(db, async (transaction) => {
+      const eventRef  = doc(db, "evenements", selectedEvent.id);
+      const eventSnap = await transaction.get(eventRef);
+      if (!eventSnap.exists()) throw new Error("Événement introuvable");
+      const data = eventSnap.data();
+      if ((data.places - (data.inscrits || 0)) <= 0) throw new Error("Événement complet");
+      transaction.update(eventRef, { inscrits: increment(1) });
+    });
+    console.log("✅ Transaction OK");
 
-      // Transaction pour vérifier les places et incrémenter
-      await runTransaction(db, async (transaction) => {
-        const eventRef  = doc(db, "evenements", selectedEvent.id);
-        const eventSnap = await transaction.get(eventRef);
-        if (!eventSnap.exists()) throw new Error("Événement introuvable");
+    // Enregistrer l'inscription
+    console.log("📝 Enregistrement inscription...");
+    await addDoc(collection(db, "inscriptions"), {
+      eventId:    selectedEvent.id,
+      eventTitle: selectedEvent.titre,
+      categorie:  slug,
+      nom:        userProfile.pseudo || userProfile.email,
+      email:      userProfile.email,
+      pseudo:     userProfile.pseudo,
+      userId:     user.uid,
+      createdAt:  serverTimestamp(),
+    });
+    console.log("✅ Inscription OK");
 
-        const data = eventSnap.data();
-        if ((data.places - (data.inscrits || 0)) <= 0) throw new Error("Événement complet");
-
-        transaction.update(eventRef, { inscrits: increment(1) });
-      });
-
-      // Enregistrer l'inscription
-      await addDoc(collection(db, "inscriptions"), {
-        eventId:    selectedEvent.id,
-        eventTitle: selectedEvent.titre,
-        categorie:  slug,
+    // Envoyer l'email de confirmation
+    console.log("📧 Envoi email...");
+    const emailRes = await fetch("/api/inscription", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
         nom:        userProfile.pseudo || userProfile.email,
         email:      userProfile.email,
-        pseudo:     userProfile.pseudo,
-        userId:     user.uid,
-        createdAt:  serverTimestamp(),
-      });
+        eventTitle: selectedEvent.titre,
+        date:       selectedEvent.date,
+        time:       selectedEvent.heure,
+      }),
+    });
 
-      // Envoyer l'email de confirmation
-      await fetch("/api/inscription", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          nom:        userProfile.pseudo || userProfile.email,
-          email:      userProfile.email,
-          eventTitle: selectedEvent.titre,
-          date:       selectedEvent.date,
-          time:       selectedEvent.heure,
-        }),
-      });
-
-      setSuccess(true);
-
-    } catch (error: any) {
-      console.error(error);
-      alert(error.message || "Une erreur est survenue lors de l'inscription.");
-    } finally {
-      setSubmitting(false);
+    if (!emailRes.ok) {
+      const emailErr = await emailRes.text();
+      console.error("❌ Email échoué :", emailErr);
+      // On ne bloque pas l'inscription si l'email échoue
+    } else {
+      console.log("✅ Email envoyé");
     }
+
+    setSuccess(true);
+
+  } catch (error: any) {
+    console.error("❌ Erreur :", error.message, error);
+    alert(error.message || "Une erreur est survenue lors de l'inscription.");
+  } finally {
+    setSubmitting(false);
   }
+}
 
   function closeModal() {
     setSelectedEvent(null);
@@ -624,7 +656,7 @@ export default function EventPageClient({ slug }: { slug: string }) {
                 const complet     = placesDispo <= 0;
                 return (
                   <Card key={event.id} style={{ animationDelay: `${i * 0.06}s` }}>
-                    <CardHeader>
+                    <CardHeader $bgImage={event.image}>
                       <CardDate dateTime={event.date}>{event.date} · {event.heure}</CardDate>
                       <CardTitle>{event.titre}</CardTitle>
                     </CardHeader>
@@ -654,7 +686,7 @@ export default function EventPageClient({ slug }: { slug: string }) {
             <Grid>
               {past.map((event, i) => (
                 <Card key={event.id} style={{ animationDelay: `${i * 0.06}s`, opacity: 0.55 }}>
-                  <CardHeader>
+                  <CardHeader $bgImage={event.image}>
                     <CardDate dateTime={event.date}>{event.date} · {event.heure}</CardDate>
                     <CardTitle>{event.titre}</CardTitle>
                   </CardHeader>
@@ -682,6 +714,11 @@ export default function EventPageClient({ slug }: { slug: string }) {
             {!success ? (
               <>
                 <ModalTitle>S&apos;inscrire</ModalTitle>
+
+                {selectedEvent.image && (
+                  <ModalImage src={selectedEvent.image} alt={selectedEvent.titre} />
+                )}
+
                 <ModalSubtitle>
                   {selectedEvent.titre} · {selectedEvent.date} à {selectedEvent.heure}
                 </ModalSubtitle>

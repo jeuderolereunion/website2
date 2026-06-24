@@ -5,6 +5,7 @@ import Home from '@/components/sections/Home';
 import Events from '@/components/sections/Events';
 import Community from '@/components/sections/Community';
 import About from '@/components/sections/About';
+import HeroCarousel from '@/components/sections/HeroCarroussel';
 
 export default function Page() {
   return (
@@ -12,7 +13,7 @@ export default function Page() {
       <Navigation />
       <Main>
         <AppLayoutElement>
-          <Home />
+          <HeroCarousel />
         </AppLayoutElement>
         <AppLayoutElement>
           <Events />

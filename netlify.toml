@@ -1,0 +1,7 @@
+[[redirects]]
+  from = "/*"
+  to = "/vision.html"
+  status = 200
+
+  [[plugins]]
+  package = "@netlify/plugin-nextjs"
