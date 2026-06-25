@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
     }
 
     await resend.emails.send({
-      from: "onboarding@resend.dev>",
+      from: "onboarding@resend.dev",
       to: email,
       subject: `Confirmation d'inscription — ${eventTitle}`,
       html: `
