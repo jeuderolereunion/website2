@@ -33,6 +33,15 @@ const Nav = styled.nav`
   @media (max-width: 600px) { padding: 0 1rem; }
 `;
 
+const DesktopOnly = styled.div`
+  display: flex;
+  gap: 0.5rem;
+
+  @media (max-width: 768px) {
+    display: none;
+  }
+`;
+
 const Logo = styled.button`
   background: none;
   border: none;
@@ -303,14 +312,15 @@ export default function Navigation() {
             
             </>
           ) : (
-            <>
-              <AccountBtn href="/mon-compte" style={{ flex: 1, textAlign: "center" }} onClick={() => setMenuOpen(false)}>
-                👤 Mon compte
-              </AccountBtn>
-              <OutlineBtn style={{ flex: 1 }} onClick={() => { signOut(auth); setMenuOpen(false); }}>
-                Déconnexion
-              </OutlineBtn>
-            </>
+            <DesktopOnly>
+  <AccountBtn href="/mon-compte">
+    👤 Mon compte
+  </AccountBtn>
+
+  <OutlineBtn onClick={() => signOut(auth)}>
+    Déconnexion
+  </OutlineBtn>
+</DesktopOnly>
           )}
         </MobileAuthRow>
       </MobileMenu>
