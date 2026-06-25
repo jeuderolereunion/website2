@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
     }
 
     await transporter.sendMail({
-      from:    `"JDR Réunion" <${process.env.SMTP_USER}>`,
+      from:    `"JDR Réunion" <jeuderolereunion@gmail.com>`,
       to:      email,
       subject: `Confirmation d'inscription — ${eventTitle}`,
       html: `
