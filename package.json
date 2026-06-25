@@ -33,11 +33,12 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@types/nodemailer": "^8.0.1",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "resend": "^4.x",
     "eslint-config-next": "^16.1.6",
+    "resend": "^4.x",
     "typescript": "5.9.3"
   },
   "engines": {
