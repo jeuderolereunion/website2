@@ -35,6 +35,7 @@ const Nav = styled.nav`
 
 const DesktopOnly = styled.div`
   display: flex;
+  align-items: center;
   gap: 0.5rem;
 
   @media (max-width: 768px) {
@@ -203,6 +204,21 @@ const MobileAuthRow = styled.div`
   margin-top: 0.75rem;
 `;
 
+const MobileOutlineBtn = styled(OutlineBtn)`
+  flex: 1;
+  text-align: center;
+`;
+
+const MobileGoldBtn = styled(GoldBtn)`
+  flex: 1;
+  text-align: center;
+`;
+
+const MobileAccountBtn = styled(AccountBtn)`
+  flex: 1;
+  text-align: center;
+`;
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function navigate(path: string) { window.location.href = path; }
@@ -261,31 +277,28 @@ export default function Navigation() {
         </Links>
 
         <AuthButtons>
-          {/* Desktop auth */}
-          {!user ? (
-            <>
-              <OutlineBtn
-                onClick={() => navigate(`/login?redirect=${encodeURIComponent(pathname)}`)}
-                style={{ display: "" } as any}
-                
-              >
-                Se connecter
-              </OutlineBtn>
-              <GoldBtn
-                onClick={() => navigate("/register")}
-                
-              >
-                S'inscrire
-              </GoldBtn>
-            </>
-          ) : (
-            <>
-              <AccountBtn href="/mon-compte" className="desktop-only">👤 Mon compte</AccountBtn>
-              <OutlineBtn onClick={() => signOut(auth)} className="desktop-only">Déconnexion</OutlineBtn>
-            </>
-          )}
+          {/* Desktop auth — caché en mobile pour laisser la place au hamburger */}
+          <DesktopOnly>
+            {!user ? (
+              <>
+                <OutlineBtn
+                  onClick={() => navigate(`/login?redirect=${encodeURIComponent(pathname)}`)}
+                >
+                  Se connecter
+                </OutlineBtn>
+                <GoldBtn onClick={() => navigate("/register")}>
+                  S'inscrire
+                </GoldBtn>
+              </>
+            ) : (
+              <>
+                <AccountBtn href="/mon-compte">👤 Mon compte</AccountBtn>
+                <OutlineBtn onClick={() => signOut(auth)}>Déconnexion</OutlineBtn>
+              </>
+            )}
+          </DesktopOnly>
 
-          {/* Hamburger */}
+          {/* Hamburger — visible uniquement en mobile */}
           <HamburgerBtn onClick={() => setMenuOpen(o => !o)} aria-label="Menu">
             <Bar $open={menuOpen} $pos="top" />
             <Bar $open={menuOpen} $pos="mid" />
@@ -308,19 +321,22 @@ export default function Navigation() {
         <MobileAuthRow>
           {!user ? (
             <>
-             
-            
+              <MobileOutlineBtn
+                onClick={() => handleNav(() => navigate(`/login?redirect=${encodeURIComponent(pathname)}`))}
+              >
+                Se connecter
+              </MobileOutlineBtn>
+              <MobileGoldBtn onClick={() => handleNav(() => navigate("/register"))}>
+                S'inscrire
+              </MobileGoldBtn>
             </>
           ) : (
-            <DesktopOnly>
-  <AccountBtn href="/mon-compte">
-    👤 Mon compte
-  </AccountBtn>
-
-  <OutlineBtn onClick={() => signOut(auth)}>
-    Déconnexion
-  </OutlineBtn>
-</DesktopOnly>
+            <>
+              <MobileAccountBtn href="/mon-compte">👤 Mon compte</MobileAccountBtn>
+              <MobileOutlineBtn onClick={() => handleNav(() => signOut(auth))}>
+                Déconnexion
+              </MobileOutlineBtn>
+            </>
           )}
         </MobileAuthRow>
       </MobileMenu>
