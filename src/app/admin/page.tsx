@@ -610,10 +610,10 @@ export default function AdminPage() {
       });
       await deleteDoc(doc(db, "propositions_evenements", event.id));
       chargerPropositions();
-      alert("Événement validé !");
+      
     } catch (err) {
       console.error(err);
-      alert("Erreur.");
+      
     }
   }
 
@@ -666,10 +666,10 @@ export default function AdminPage() {
       prev.filter((r) => r.id !== id)
     );
 
-    alert("✅ Ressource supprimée");
+    
   } catch (error) {
     console.error(error);
-    alert("❌ Erreur lors de la suppression");
+    
   }
 }
 

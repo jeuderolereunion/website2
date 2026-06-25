@@ -3,6 +3,10 @@
 import { useState, useEffect } from "react";
 import styled, { keyframes } from "styled-components";
 import Link from "next/link";
+import FullCalendar from "@fullcalendar/react";
+import dayGridPlugin from "@fullcalendar/daygrid";
+import interactionPlugin from "@fullcalendar/interaction";
+import { createGlobalStyle } from "styled-components";
 import { usePathname } from "next/navigation";
 import { db, auth } from "@/lib/firebase";
 import { onAuthStateChanged, User } from "firebase/auth";
@@ -409,6 +413,99 @@ const SuccessMsg = styled.div`
   font-size: 0.95rem;
 `;
 
+const CalendarGlobal = createGlobalStyle`
+  .fc {
+    --fc-border-color: rgba(255,255,255,0.08);
+    --fc-today-bg-color: rgba(160,120,255,0.1);
+    --fc-page-bg-color: transparent;
+    color: rgba(255,255,255,0.85);
+    font-family: inherit;
+  }
+  .fc-toolbar-title {
+    font-size: 1rem !important;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: white;
+  }
+  .fc-button {
+    background: rgba(255,255,255,0.07) !important;
+    border: 1px solid rgba(255,255,255,0.12) !important;
+    color: rgba(255,255,255,0.8) !important;
+    border-radius: 8px !important;
+    font-size: 0.8rem !important;
+    padding: 4px 12px !important;
+  }
+  .fc-button:hover {
+    background: rgba(255,255,255,0.14) !important;
+    color: white !important;
+  }
+  .fc-button-active, .fc-button:focus {
+    background: rgba(160,120,255,0.3) !important;
+    box-shadow: none !important;
+  }
+  .fc-col-header-cell {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.4);
+    padding: 8px 0;
+    background: rgba(255,255,255,0.03);
+  }
+  .fc-daygrid-day-number {
+    color: rgba(255,255,255,0.4);
+    font-size: 0.8rem;
+    padding: 6px 8px;
+  }
+  .fc-day-today .fc-daygrid-day-number {
+    background: rgba(160,120,255,0.5);
+    border-radius: 50%;
+    color: white;
+    width: 26px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 4px;
+    padding: 0;
+  }
+  .fc-event {
+    border: none !important;
+    border-radius: 6px !important;
+    font-size: 0.73rem !important;
+    font-weight: 600 !important;
+    padding: 2px 6px !important;
+    cursor: pointer;
+  }
+  .fc-daygrid-more-link {
+    color: rgba(160,120,255,0.9);
+    font-size: 0.72rem;
+    font-weight: 600;
+  }
+`;
+
+const CalendarWrapper = styled.div`
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 16px;
+  padding: 1.5rem;
+  margin-bottom: 3rem;
+`;
+
+const CalendarToggle = styled.button<{ $active: boolean }>`
+  padding: 0.4rem 1rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid ${p => p.$active ? 'rgba(160,120,255,0.7)' : 'rgba(255,255,255,0.15)'};
+  background: ${p => p.$active ? 'rgba(120,80,255,0.2)' : 'transparent'};
+  color: ${p => p.$active ? '#c8a8ff' : 'rgba(255,255,255,0.5)'};
+  transition: all 150ms;
+  margin-bottom: 1.25rem;
+`;
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type EventDoc = {
@@ -443,6 +540,7 @@ const categories: Record<string, { icon: string; title: string; subtitle: string
 
 export default function EventPageClient({ slug }: { slug: string }) {
   const cat      = categories[slug];
+  const [showCalendar, setShowCalendar] = useState(false);
   const pathname = usePathname();
 
   const [user, setUser]                   = useState<User | null>(null);
@@ -458,7 +556,21 @@ export default function EventPageClient({ slug }: { slug: string }) {
   const [success, setSuccess]             = useState(false);
 
   // ── Auth + profil ─────────────────────────────────────────────────────────
+const TYPE_COLORS: Record<string, string> = {
+  tournoi: "#c9a84c", soiree: "#7c4dff",
+  convention: "#e91e8c", atelier: "#00bcd4", default: "#5c6bc0",
+};
 
+const fcEvents = events
+  .filter(e => !!e.date)
+  .map(e => ({
+    id: e.id,
+    title: e.titre,
+    date: e.date,
+    backgroundColor: TYPE_COLORS[e.categorie] ?? TYPE_COLORS.default,
+    borderColor: "transparent",
+    extendedProps: e,
+  }));
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
       setUser(firebaseUser);
@@ -639,7 +751,34 @@ export default function EventPageClient({ slug }: { slug: string }) {
           </FilterBtn>
         ))}
       </FiltersRow>
+       <CalendarGlobal />
 
+<Section>
+  <CalendarToggle
+    $active={showCalendar}
+    onClick={() => setShowCalendar(v => !v)}
+  >
+    {showCalendar ? "📋 Vue liste" : "📅 Vue calendrier"}
+  </CalendarToggle>
+
+  {showCalendar && (
+    <CalendarWrapper>
+      <FullCalendar
+        plugins={[dayGridPlugin, interactionPlugin]}
+        initialView="dayGridMonth"
+        locale="fr"
+        events={fcEvents}
+        eventClick={(info) => {
+          const e = info.event.extendedProps as EventDoc;
+          if (e.date >= now) setSelectedEvent(e);
+        }}
+        headerToolbar={{ left: "prev,next", center: "title", right: "today" }}
+        height="auto"
+        dayMaxEvents={3}
+      />
+    </CalendarWrapper>
+  )}
+</Section>
       <Section>
         {loading && <LoadingState>Chargement des événements…</LoadingState>}
 

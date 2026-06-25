@@ -3,20 +3,21 @@
 import { useState, useEffect } from "react";
 import styled from "styled-components";
 import Link from "next/link";
+import { Container } from '@/components/Container';
 
 const trailers = [
 {
 id: 1,
 title: "Bienvenue chez JDR Réunion",
 subtitle: "Découvrez notre communauté de joueurs de rôle à La Réunion",
-image: "/images/banner1.webp",
+image: "/images/Carroussel1.png",
 link: "/presentation",
 },
 {
 id: 2,
-title: "Campagnes Épiques",
-subtitle: "Warhammer, Fallout, D&D et bien plus encore",
-image: "/images/banner2.webp",
+title: "Un film une série un scénario",
+subtitle: "Mario,Le Silo et bien plus encore ",
+image: "/images/",
 link: "/parties",
 },
 {
@@ -31,12 +32,12 @@ link: "/evenements",
 const Hero = styled.section`
 position: relative;
 width: 100%;
-height: 550px;
+height: 750px;
 overflow: hidden;
 border-radius: 20px;
 
 @media (max-width: 768px) {
-height: 420px;
+height: 720px;
 }
 `;
 
@@ -166,6 +167,7 @@ prev === 0 ? trailers.length - 1 : prev - 1
 };
 
 return (
+<Container id="home">
   <Hero>
     {trailers.map((slide, index) => (
       <Slide
@@ -218,5 +220,6 @@ return (
       </NavButton>
     </Controls>
   </Hero>
+  </Container>
 );
 }

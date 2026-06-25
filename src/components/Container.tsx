@@ -9,10 +9,12 @@ const Container = styled.div`
   display: flex;
   flex: 0 0 auto;
   font-size: 2rem;
-  height: 100vh;
+  min-height: 100vh;      /* ← min au lieu de height fixe */
+  height: auto;           /* ← laisse grandir si besoin */
   justify-content: center;
   scroll-snap-align: start;
   width: 100%;
+  padding-bottom: 4rem;   /* ← respiration en bas */
 `;
 
 export { Container };

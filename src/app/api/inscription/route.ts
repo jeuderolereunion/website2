@@ -1,18 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
 
-const transporter = nodemailer.createTransport({
-  host:   process.env.SMTP_HOST,
-  port:   Number(process.env.SMTP_PORT) || 587,
-  secure: false,
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-  tls: {
-    rejectUnauthorized: false,
-  },
-});
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 export async function POST(req: NextRequest) {
   try {
@@ -22,9 +11,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Champs manquants" }, { status: 400 });
     }
 
-    await transporter.sendMail({
-      from:    `"JDR Réunion" <${process.env.SMTP_USER}>`,
-      to:      email,
+    await resend.emails.send({
+      from: "onboarding@resend.dev>",
+      to: email,
       subject: `Confirmation d'inscription — ${eventTitle}`,
       html: `
         <div style="font-family: sans-serif; max-width: 520px; margin: 0 auto; padding: 2rem; background: #0d0d14; color: #fff; border-radius: 12px;">

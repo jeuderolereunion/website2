@@ -1,7 +1,11 @@
 import { initializeApp, getApps } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
-import { getAuth } from "firebase/auth";
- 
+import {
+  getAuth,
+  setPersistence,
+  browserSessionPersistence,
+} from "firebase/auth";
+
 const firebaseConfig = {
   apiKey: "AIzaSyAhSznkVo1QDuSQ3csMGQN57EdwGUPHzeM",
   authDomain: "jdr-reunion-e5a17.firebaseapp.com",
@@ -11,11 +15,10 @@ const firebaseConfig = {
   appId: "1:1026446311409:web:5df23d58b16bc4ce16ce50",
   measurementId: "G-1TLYEBHDGD",
 };
- 
-const app =
-  getApps().length === 0
-    ? initializeApp(firebaseConfig)
-    : getApps()[0];
 
-export const db = getFirestore(app);
+const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+
 export const auth = getAuth(app);
+export const db = getFirestore(app);
+
+setPersistence(auth, browserSessionPersistence);
