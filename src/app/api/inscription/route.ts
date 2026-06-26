@@ -22,52 +22,65 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    // Version texte brut — obligatoire pour la délivrabilité,
-    // les filtres anti-spam pénalisent les emails HTML-only.
-    const textVersion = `Bonjour ${nom},
+    const textVersion = `Inscription confirmée !
 
-Votre inscription à l'événement suivant est confirmée :
+Bonjour ${nom},
 
-Événement : ${eventTitle}
-Date : ${date}
-Heure : ${time}
+Votre inscription à l'événement suivant a bien été enregistrée :
 
-À très bientôt !
-Donjons & Plateau`;
+${eventTitle}
+${date} à ${time}
+
+À bientôt sur place !
+
+JDR Réunion — jdr-reunion.com`;
+
+    const htmlVersion = `
+      <div style="background:#0d0d14; padding: 32px 16px; font-family: Arial, Helvetica, sans-serif;">
+        <div style="max-width: 480px; margin: 0 auto; background:#13131e; border:1px solid rgba(255,255,255,0.1); border-radius:14px; padding: 32px;">
+
+          <p style="font-size: 20px; font-weight: bold; color:#fff; margin: 0 0 24px;">
+            🎲 <span style="color:#c8a8ff;">Inscription confirmée !</span>
+          </p>
+
+          <p style="color:#fff; font-size: 15px; margin: 0 0 16px;">
+            Bonjour <strong>${nom}</strong>,
+          </p>
+
+          <p style="color:rgba(255,255,255,0.7); font-size: 14px; margin: 0 0 20px;">
+            Votre inscription à l'événement suivant a bien été enregistrée :
+          </p>
+
+          <div style="background:rgba(120,80,255,0.12); border:1px solid rgba(160,120,255,0.25); border-radius:10px; padding: 18px 20px; margin-bottom: 24px;">
+            <p style="color:#fff; font-size: 16px; font-weight:bold; margin: 0 0 8px;">
+              ${eventTitle}
+            </p>
+            <p style="color:rgba(255,255,255,0.6); font-size: 13px; margin: 0;">
+              📅 ${date} à ${time}
+            </p>
+          </div>
+
+          <p style="color:rgba(255,255,255,0.7); font-size: 14px; margin: 0 0 28px;">
+            À bientôt sur place !
+          </p>
+
+          <p style="color:rgba(255,255,255,0.4); font-size: 12px; margin: 0; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 16px;">
+            JDR Réunion — <a href="https://jdr-reunion.re" style="color:#8e7cff; text-decoration:none;">jdr-reunion.re</a>
+          </p>
+
+        </div>
+      </div>
+    `;
 
     const mailOptions = {
-      from: `"Donjons & Plateau" <${process.env.SMTP_USER}>`,
+      from: `"JDR Réunion" <${process.env.SMTP_USER}>`,
       to: email,
       replyTo: process.env.SMTP_USER,
       subject: `Confirmation d'inscription - ${eventTitle}`,
       text: textVersion,
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 480px; margin: auto; color: #222;">
-          <h2 style="color:#7c4dff;">Inscription confirmée</h2>
-          <p>Bonjour ${nom},</p>
-          <p>Votre inscription à l'événement suivant est confirmée :</p>
-          <table style="width:100%; border-collapse: collapse; margin: 16px 0;">
-            <tr>
-              <td style="padding: 6px 0; color:#555;">Événement</td>
-              <td style="padding: 6px 0; font-weight:bold;">${eventTitle}</td>
-            </tr>
-            <tr>
-              <td style="padding: 6px 0; color:#555;">Date</td>
-              <td style="padding: 6px 0; font-weight:bold;">${date}</td>
-            </tr>
-            <tr>
-              <td style="padding: 6px 0; color:#555;">Heure</td>
-              <td style="padding: 6px 0; font-weight:bold;">${time}</td>
-            </tr>
-          </table>
-          <p>À très bientôt !</p>
-          <p style="color:#888; font-size: 0.8rem; margin-top: 24px;">
-            Donjons &amp; Plateau — Réunion
-          </p>
-        </div>
-      `,
+      html: htmlVersion,
       headers: {
-        "X-Entity-Ref-ID": `${eventTitle}-${Date.now()}`, // évite que Gmail regroupe/déduplique des emails similaires comme suspects
+        "X-Entity-Ref-ID": `${eventTitle}-${Date.now()}`,
       },
     };
 
