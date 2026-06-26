@@ -1,49 +1,55 @@
 import { NextRequest, NextResponse } from "next/server";
 import nodemailer from "nodemailer";
 
-const transporter = nodemailer.createTransport({
-  host:   "smtp.gmail.com",
-  port:   Number(process.env.SMTP_PORT) || 587,
-  secure: false,
-  auth: {
-    user: "jeuderolereunion@gmail.com",
-    pass: process.env.SMTP_PASS,
-  },
-});
-
 export async function POST(req: NextRequest) {
   try {
     const { nom, email, eventTitle, date, time } = await req.json();
 
-    if (!nom || !email || !eventTitle) {
-      return NextResponse.json({ error: "Champs manquants" }, { status: 400 });
+    if (!nom || !email || !eventTitle || !date || !time) {
+      return NextResponse.json(
+        { error: "Champs manquants dans la requête." },
+        { status: 400 }
+      );
     }
 
-    await transporter.sendMail({
-      from:    `"JDR Réunion" <jeuderolereunion@gmail.com>`,
-      to:      email,
-      subject: `Confirmation d'inscription — ${eventTitle}`,
-      html: `
-        <div style="font-family: sans-serif; max-width: 520px; margin: 0 auto; padding: 2rem; background: #0d0d14; color: #fff; border-radius: 12px;">
-          <h2 style="color: #c8a8ff;">🎲 Inscription confirmée !</h2>
-          <p>Bonjour <strong>${nom}</strong>,</p>
-          <p>Votre inscription à l'événement suivant a bien été enregistrée :</p>
-          <div style="background: rgba(120,80,255,0.15); border: 1px solid rgba(160,120,255,0.3); border-radius: 8px; padding: 1rem; margin: 1.5rem 0;">
-            <p style="margin: 0; font-size: 1.1rem; font-weight: bold;">${eventTitle}</p>
-            <p style="margin: 0.5rem 0 0; color: rgba(255,255,255,0.6);">📅 ${date} à ${time}</p>
-          </div>
-          <p>À bientôt sur place !</p>
-          <p style="color: rgba(255,255,255,0.4); font-size: 0.8rem; margin-top: 2rem;">
-            JDR Réunion — jdr-reunion.re
-          </p>
-        </div>
-      `,
+    // Transporteur SMTP — adapte les variables d'env à ton fournisseur
+    const transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,         // ex: "smtp.gmail.com" ou "ssl0.ovh.net"
+      port: Number(process.env.SMTP_PORT), // ex: 465
+      secure: Number(process.env.SMTP_PORT) === 567, // true pour 465, false pour 587
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+      },
     });
 
-    return NextResponse.json({ ok: true });
+    const mailOptions = {
+      from: `"Donjons & Plateau" <${process.env.SMTP_USER}>`,
+      to: email,
+      subject: `Confirmation d'inscription — ${eventTitle}`,
+      html: `
+        <div style="font-family: sans-serif; max-width: 480px; margin: auto;">
+          <h2 style="color:#7c4dff;">Inscription confirmée 🎉</h2>
+          <p>Bonjour ${nom},</p>
+          <p>Votre inscription à l'événement suivant est confirmée :</p>
+          <ul>
+            <li><strong>Événement :</strong> ${eventTitle}</li>
+            <li><strong>Date :</strong> ${date}</li>
+            <li><strong>Heure :</strong> ${time}</li>
+          </ul>
+          <p>À très bientôt !</p>
+        </div>
+      `,
+    };
 
+    await transporter.sendMail(mailOptions);
+
+    return NextResponse.json({ success: true });
   } catch (error: any) {
-    console.error("Erreur email inscription :", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("❌ Erreur envoi email :", error);
+    return NextResponse.json(
+      { error: error.message || "Erreur lors de l'envoi de l'email." },
+      { status: 500 }
+    );
   }
 }
