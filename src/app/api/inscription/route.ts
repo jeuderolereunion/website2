@@ -65,7 +65,7 @@ JDR Réunion — jdr-reunion.com`;
           </p>
 
           <p style="color:rgba(255,255,255,0.4); font-size: 12px; margin: 0; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 16px;">
-            JDR Réunion — <a href="https://jdr-reunion.re" style="color:#8e7cff; text-decoration:none;">jdr-reunion.re</a>
+            JDR Réunion — <a href="https://jdr-reunion.com" style="color:#8e7cff; text-decoration:none;">jdr-reunion.re</a>
           </p>
 
         </div>
