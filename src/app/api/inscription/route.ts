@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
     });
 
     const mailOptions = {
-      from: `"Donjons & Plateau" <${process.env.SMTP_USER}>`,
+      from: ` <${process.env.SMTP_USER}>`,
       to: email,
       subject: `Confirmation d'inscription — ${eventTitle}`,
       html: `
