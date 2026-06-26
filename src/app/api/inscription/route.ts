@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
     const transporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST,         // ex: "smtp.gmail.com" ou "ssl0.ovh.net"
       port: Number(process.env.SMTP_PORT), // ex: 465
-      secure: Number(process.env.SMTP_PORT) === 567, // true pour 465, false pour 587
+     secure: Number(process.env.SMTP_PORT) === 465, // true pour 465, false pour 587
       auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS,
@@ -46,10 +46,15 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true });
   } catch (error: any) {
-    console.error("❌ Erreur envoi email :", error);
-    return NextResponse.json(
-      { error: error.message || "Erreur lors de l'envoi de l'email." },
-      { status: 500 }
-    );
-  }
+  console.error("❌ Erreur envoi email :", {
+    message: error.message,
+    code: error.code,
+    command: error.command,
+    response: error.response,
+  });
+  return NextResponse.json(
+    { error: error.message || "Erreur lors de l'envoi de l'email." },
+    { status: 500 }
+  );
+}
 }
