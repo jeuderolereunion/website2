@@ -18,7 +18,7 @@ id: 2,
 title: "Un film une série un scénario",
 subtitle: "Mario,Le Silo et bien plus encore ",
 image: "/images/",
-link: "/parties",
+link: "/evenements/soirées-jdr",
 },
 {
 id: 3,
