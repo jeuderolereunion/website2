@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import styled from "styled-components";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { collection, addDoc, doc, getDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useRouter } from "next/navigation";
 import Navigation from "@/components/Navigation";
@@ -88,6 +88,106 @@ const TextArea = styled.textarea`
   box-sizing: border-box;
 `;
 
+const AddressWrapper = styled.div`
+  position: relative;
+`;
+
+const AddressSuggestions = styled.ul`
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 10;
+  margin: 0;
+  padding: 0.3rem;
+  list-style: none;
+  background: #1a1a2e;
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+`;
+
+const AddressSuggestionItem = styled.li`
+  padding: 0.55rem 0.6rem;
+  font-size: 0.85rem;
+  color: rgba(255,255,255,0.85);
+  border-radius: 6px;
+  cursor: pointer;
+  &:hover {
+    background: rgba(124,77,255,0.18);
+  }
+`;
+
+const AddressLoading = styled.span`
+  position: absolute;
+  right: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.75rem;
+  color: rgba(255,255,255,0.4);
+`;
+
+const UserInfoBox = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: rgba(120,80,255,0.1);
+  border: 1px solid rgba(160,120,255,0.2);
+  border-radius: 10px;
+  margin-bottom: 0.5rem;
+`;
+
+const UserAvatar = styled.div`
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(120,80,255,0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  flex-shrink: 0;
+`;
+
+const UserDetails = styled.div`
+  flex: 1;
+  min-width: 0;
+`;
+
+const UserName = styled.p`
+  font-size: 0.88rem;
+  font-weight: 600;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+`;
+
+const UserEmail = styled.p`
+  font-size: 0.78rem;
+  color: rgba(255,255,255,0.45);
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+`;
+
+const NotConnectedBox = styled.div`
+  padding: 1rem;
+  border-radius: 10px;
+  background: rgba(255,180,60,0.1);
+  border: 1px solid rgba(255,180,60,0.3);
+  color: #ffcf8a;
+  font-size: 0.85rem;
+`;
+
+// ⚠️ FIX : le <select> natif ne propage pas la couleur/fond aux <option>.
+// Le navigateur applique son propre thème (souvent fond blanc + texte noir,
+// ou texte blanc sur fond blanc imposé par l'OS) tant que les <option>
+// ne sont pas stylisées explicitement.
 const Select = styled.select`
   width: 100%;
   padding: 0.75rem;
@@ -96,6 +196,11 @@ const Select = styled.select`
   border-radius: 8px;
   color: white;
   box-sizing: border-box;
+
+  option {
+    background: #1a1a2e;
+    color: white;
+  }
 `;
 
 // ── Type toggle ───────────────────────────────────────────────────────────────
@@ -122,6 +227,30 @@ const TypeBtn = styled.button<{ $active: boolean }>`
     border-color: rgba(124,77,255,0.5);
     color: #c8a8ff;
   }
+`;
+
+const AgeTag = styled.span<{ $level: "tous" | "16" | "18" }>`
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  margin-left: 0.5rem;
+  vertical-align: middle;
+  background: ${p =>
+    p.$level === "18" ? "rgba(255,80,80,0.15)"
+    : p.$level === "16" ? "rgba(255,180,60,0.15)"
+    : "rgba(120,255,160,0.12)"};
+  color: ${p =>
+    p.$level === "18" ? "#ff9a9a"
+    : p.$level === "16" ? "#ffcf8a"
+    : "#9affc0"};
+  border: 1px solid ${p =>
+    p.$level === "18" ? "rgba(255,80,80,0.35)"
+    : p.$level === "16" ? "rgba(255,180,60,0.35)"
+    : "rgba(120,255,160,0.3)"};
 `;
 
 const FileDropZone = styled.label`
@@ -242,13 +371,57 @@ const SYSTEMES = [
 
 // ─── Composant ────────────────────────────────────────────────────────────────
 
+type UserProfile = {
+  pseudo: string;
+  email: string;
+};
+
 export default function ProposerEvenementPage() {
   const router = useRouter();
   const [uid, setUid] = useState<string | null>(null);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
 
+  // ⚠️ On récupère désormais le pseudo + email du compte connecté, comme dans
+  // EventPageClient.tsx, au lieu de demander à l'utilisateur de les ressaisir :
+  // celui qui propose l'événement est forcément celui qui est connecté.
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (user) => setUid(user?.uid ?? null));
+    const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
+      setUid(firebaseUser?.uid ?? null);
+
+      if (firebaseUser) {
+        const userSnap = await getDoc(doc(db, "users", firebaseUser.uid));
+        if (userSnap.exists()) {
+          const data = userSnap.data();
+          setUserProfile({
+            pseudo: data.pseudo || "",
+            email:  firebaseUser.email || "",
+          });
+        } else {
+          setUserProfile({ pseudo: "", email: firebaseUser.email || "" });
+        }
+      } else {
+        setUserProfile(null);
+      }
+
+      setProfileLoading(false);
+    });
     return () => unsub();
+  }, []);
+
+  // ⚠️ Garde-fou : si les variables d'env Cloudinary sont absentes au build,
+  // on le signale clairement en console dès le montage plutôt que de laisser
+  // l'upload échouer silencieusement avec une URL du type ".../v1_1/undefined/...".
+  useEffect(() => {
+    if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_UPLOAD_PRESET) {
+      console.error(
+        "❌ Configuration Cloudinary manquante. Vérifie que " +
+        "NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME et NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET " +
+        "sont bien définies dans les variables d'environnement (et que le projet " +
+        "a été rebuild/redéployé après leur ajout, car les variables NEXT_PUBLIC_* " +
+        "sont injectées au moment du build)."
+      );
+    }
   }, []);
 
   const [loading, setLoading]             = useState(false);
@@ -257,6 +430,13 @@ export default function ProposerEvenementPage() {
   const [imageFile, setImageFile]         = useState<File | null>(null);
   const [imagePreview, setImagePreview]   = useState<string | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
+
+  // ── Autocomplétion d'adresse (API Adresse data.gouv.fr) ──────────────────
+  const [addressSuggestions, setAddressSuggestions] = useState<string[]>([]);
+  const [addressLoading, setAddressLoading]         = useState(false);
+  const [showSuggestions, setShowSuggestions]       = useState(false);
+  const addressDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const addressAbortRef    = useRef<AbortController | null>(null);
 
   const [form, setForm] = useState({
     titre:        "",
@@ -269,9 +449,60 @@ export default function ProposerEvenementPage() {
     heure:        "",
     niveau:       "Débutant",
     places:       6,
-    organisateur: "",
-    email:        "",
+    // ── Nouveaux champs ──────────────────────────────────────────────────
+    lieuType:     "presentiel" as "presentiel" | "ligne", // ← présentiel ou en ligne
+    lieuDetail:   "",            // ← adresse OU plateforme (Discord, Roll20, Foundry...)
+    duree:        "2-3h",        // ← durée estimée de la session
+    personnages:  "pretires" as "pretires" | "creation",  // ← prétirés ou création à la table
+    ageTag:       "tous" as "tous" | "16" | "18",          // ← tag âge/contenu sensible
   });
+
+  // ⚠️ Appelle l'API Adresse gouv.fr avec un debounce de 300ms pour éviter
+  // de spammer l'API à chaque frappe. N'interroge que si on est en mode
+  // "Présentiel" et que le texte fait au moins 3 caractères.
+  function handleAddressChange(value: string) {
+    setForm(f => ({ ...f, lieuDetail: value }));
+
+    if (addressDebounceRef.current) clearTimeout(addressDebounceRef.current);
+    if (addressAbortRef.current) addressAbortRef.current.abort();
+
+    if (form.lieuType !== "presentiel" || value.trim().length < 3) {
+      setAddressSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
+
+    addressDebounceRef.current = setTimeout(async () => {
+      const controller = new AbortController();
+      addressAbortRef.current = controller;
+      setAddressLoading(true);
+      try {
+        const res = await fetch(
+          `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(value)}&limit=5`,
+          { signal: controller.signal }
+        );
+        if (!res.ok) throw new Error("Échec de la recherche d'adresse.");
+        const data = await res.json();
+        const labels: string[] = (data.features || []).map(
+          (f: any) => f.properties.label as string
+        );
+        setAddressSuggestions(labels);
+        setShowSuggestions(labels.length > 0);
+      } catch (err: any) {
+        if (err.name !== "AbortError") {
+          console.error("❌ Erreur autocomplétion adresse :", err);
+        }
+      } finally {
+        setAddressLoading(false);
+      }
+    }, 300);
+  }
+
+  function handleSelectAddress(label: string) {
+    setForm(f => ({ ...f, lieuDetail: label }));
+    setAddressSuggestions([]);
+    setShowSuggestions(false);
+  }
 
   function handleImageChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -288,15 +519,38 @@ export default function ProposerEvenementPage() {
     setImagePreview(null);
   }
 
+  // ⚠️ FIX : on lit désormais le corps de la réponse d'erreur Cloudinary
+  // (res.json().error.message) au lieu de jeter un message générique.
+  // Cloudinary renvoie des messages très précis : "Upload preset not found",
+  // "Invalid cloud_name", "Upload preset must be whitelisted for unsigned uploads", etc.
   async function uploadToCloudinary(file: File): Promise<string> {
+    if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_UPLOAD_PRESET) {
+      throw new Error(
+        "Configuration Cloudinary manquante (variables d'environnement non définies)."
+      );
+    }
+
     const formData = new FormData();
     formData.append("file", file);
     formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
+
     const res = await fetch(
       `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`,
       { method: "POST", body: formData }
     );
-    if (!res.ok) throw new Error("Échec de l'upload de l'image sur Cloudinary.");
+
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`;
+      try {
+        const errBody = await res.json();
+        detail = errBody?.error?.message || detail;
+      } catch {
+        // le corps n'était pas du JSON exploitable, on garde le statut HTTP
+      }
+      console.error("❌ Échec upload Cloudinary :", detail);
+      throw new Error(`Échec de l'upload de l'image : ${detail}`);
+    }
+
     const data = await res.json();
     return data.secure_url as string;
   }
@@ -304,8 +558,22 @@ export default function ProposerEvenementPage() {
   async function handleSubmit() {
     setErrorMsg("");
 
-    if (!form.titre || !form.description || !form.date || !form.heure || !form.organisateur) {
+    if (!uid || !userProfile) {
+      setErrorMsg("Vous devez être connecté pour proposer un événement.");
+      return;
+    }
+
+    if (!form.titre || !form.description || !form.date || !form.heure) {
       alert("Veuillez remplir tous les champs obligatoires.");
+      return;
+    }
+
+    if (!form.lieuDetail) {
+      alert(
+        form.lieuType === "presentiel"
+          ? "Veuillez indiquer l'adresse de l'événement."
+          : "Veuillez indiquer la plateforme utilisée pour la partie en ligne."
+      );
       return;
     }
 
@@ -320,8 +588,11 @@ export default function ProposerEvenementPage() {
 
       if (imageFile) {
         setUploadingImage(true);
-        imageUrl = await uploadToCloudinary(imageFile);
-        setUploadingImage(false);
+        try {
+          imageUrl = await uploadToCloudinary(imageFile);
+        } finally {
+          setUploadingImage(false);
+        }
       }
 
       const systemeLabel = form.systeme === "Autre" ? form.systemeAutre : form.systeme;
@@ -336,12 +607,20 @@ export default function ProposerEvenementPage() {
         heure:        form.heure,
         niveau:       form.niveau,
         places:       Number(form.places),
-        organisateur: form.organisateur,
-        email:        form.email,
+        // ⚠️ FIX : organisateur/email viennent désormais du compte connecté,
+        // plus besoin de les redemander dans le formulaire.
+        organisateur: userProfile.pseudo || userProfile.email,
+        email:        userProfile.email,
         image:        imageUrl,
         statut:       "en_attente",
         createdAt:    serverTimestamp(),
-        mjId:         uid || null,
+        mjId:         uid,
+        // ── Nouveaux champs ──────────────────────────────────────────────
+        lieuType:     form.lieuType,     // ← "presentiel" ou "ligne"
+        lieuDetail:   form.lieuDetail,   // ← adresse ou plateforme
+        duree:        form.duree,        // ← durée estimée
+        personnages:  form.personnages,  // ← "pretires" ou "creation"
+        ageTag:       form.ageTag,       // ← "tous" / "16" / "18"
       });
 
       setSuccess(true);
@@ -351,14 +630,22 @@ export default function ProposerEvenementPage() {
         titre: "", description: "", categorie: "soirees-jdr",
         type: "one-shot", systeme: "", systemeAutre: "",
         date: "", heure: "", niveau: "Débutant",
-        places: 6, organisateur: "", email: "",
+        places: 6,
+        lieuType: "presentiel", lieuDetail: "", duree: "2-3h",
+        personnages: "pretires", ageTag: "tous",
       });
       setImageFile(null);
       setImagePreview(null);
 
-    } catch (error) {
+    } catch (error: any) {
+      // ⚠️ FIX : on affiche désormais le message d'erreur réel (Cloudinary ou
+      // Firestore) à l'écran, au lieu d'un message générique qui masquait
+      // la vraie cause.
       console.error(error);
-      setErrorMsg("Erreur lors de l'envoi. Vérifiez votre connexion et réessayez.");
+      setErrorMsg(
+        error?.message ||
+        "Erreur lors de l'envoi. Vérifiez votre connexion et réessayez."
+      );
     } finally {
       setLoading(false);
       setUploadingImage(false);
@@ -450,8 +737,61 @@ export default function ProposerEvenementPage() {
             </Select>
           </Field>
 
+          {/* Lieu */}
+          <SectionTitle>Lieu</SectionTitle>
+          <TypeRow>
+            <TypeBtn
+              $active={form.lieuType === "presentiel"}
+              onClick={() => setForm({ ...form, lieuType: "presentiel" })}
+            >
+              📍 Présentiel
+            </TypeBtn>
+            <TypeBtn
+              $active={form.lieuType === "ligne"}
+              onClick={() => setForm({ ...form, lieuType: "ligne" })}
+            >
+              💻 En ligne
+            </TypeBtn>
+          </TypeRow>
+          <Field>
+            <Label>
+              {form.lieuType === "presentiel" ? "Adresse *" : "Plateforme (Discord, Roll20, Foundry...) *"}
+            </Label>
+            {form.lieuType === "presentiel" ? (
+              <AddressWrapper>
+                <Input
+                  value={form.lieuDetail}
+                  onChange={e => handleAddressChange(e.target.value)}
+                  onFocus={() => { if (addressSuggestions.length > 0) setShowSuggestions(true); }}
+                  onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+                  placeholder="Commencez à taper une adresse... (Ex: 12 rue des Tavernes, Paris)"
+                  autoComplete="off"
+                />
+                {addressLoading && <AddressLoading>⏳</AddressLoading>}
+                {showSuggestions && addressSuggestions.length > 0 && (
+                  <AddressSuggestions>
+                    {addressSuggestions.map((label, i) => (
+                      <AddressSuggestionItem
+                        key={i}
+                        onClick={() => handleSelectAddress(label)}
+                      >
+                        📍 {label}
+                      </AddressSuggestionItem>
+                    ))}
+                  </AddressSuggestions>
+                )}
+              </AddressWrapper>
+            ) : (
+              <Input
+                value={form.lieuDetail}
+                onChange={e => setForm({ ...form, lieuDetail: e.target.value })}
+                placeholder="Ex: Discord — lien envoyé après inscription"
+              />
+            )}
+          </Field>
+
           {/* Date & heure */}
-          <SectionTitle>Date & lieu</SectionTitle>
+          <SectionTitle>Date & horaires</SectionTitle>
           <Row>
             <Field style={{ margin: 0 }}>
               <Label>Date *</Label>
@@ -462,6 +802,16 @@ export default function ProposerEvenementPage() {
               <Input type="time" value={form.heure} onChange={e => setForm({ ...form, heure: e.target.value })} />
             </Field>
           </Row>
+          <Field>
+            <Label>Durée estimée</Label>
+            <Select value={form.duree} onChange={e => setForm({ ...form, duree: e.target.value })}>
+              <option value="1-2h">1h - 2h</option>
+              <option value="2-3h">2h - 3h</option>
+              <option value="3-4h">3h - 4h</option>
+              <option value="4-6h">4h - 6h</option>
+              <option value="journee">Journée complète</option>
+            </Select>
+          </Field>
 
           {/* Détails */}
           <SectionTitle>Détails</SectionTitle>
@@ -484,20 +834,73 @@ export default function ProposerEvenementPage() {
             </Field>
           </Row>
 
-          {/* Organisateur */}
-          <SectionTitle>Organisateur</SectionTitle>
           <Field>
-            <Label>Nom *</Label>
-            <Input value={form.organisateur} onChange={e => setForm({ ...form, organisateur: e.target.value })} />
-          </Field>
-          <Field>
-            <Label>Email de contact</Label>
-            <Input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />
+            <Label>Personnages</Label>
+            <TypeRow style={{ marginBottom: 0 }}>
+              <TypeBtn
+                $active={form.personnages === "pretires"}
+                onClick={() => setForm({ ...form, personnages: "pretires" })}
+              >
+                🧾 Prétirés fournis
+              </TypeBtn>
+              <TypeBtn
+                $active={form.personnages === "creation"}
+                onClick={() => setForm({ ...form, personnages: "creation" })}
+              >
+                ✏️ Création à la table
+              </TypeBtn>
+            </TypeRow>
           </Field>
 
-          <Button onClick={handleSubmit} disabled={loading}>
+          <Field>
+            <Label>
+              Contenu / âge recommandé
+              <AgeTag $level={form.ageTag}>
+                {form.ageTag === "tous" ? "Tous publics" : form.ageTag === "16" ? "16+" : "18+"}
+              </AgeTag>
+            </Label>
+            <Select
+              value={form.ageTag}
+              onChange={e => setForm({ ...form, ageTag: e.target.value as "tous" | "16" | "18" })}
+            >
+              <option value="tous">Tous publics</option>
+              <option value="16">16+ (thèmes matures)</option>
+              <option value="18">18+ (violence, horreur explicite...)</option>
+            </Select>
+          </Field>
+
+          {/* Organisateur */}
+          <SectionTitle>Organisateur</SectionTitle>
+          {profileLoading ? (
+            <Field>
+              <FileHint>Chargement de votre profil…</FileHint>
+            </Field>
+          ) : userProfile ? (
+            <Field>
+              <UserInfoBox>
+                <UserAvatar>🧙</UserAvatar>
+                <UserDetails>
+                  <UserName>{userProfile.pseudo || "Aventurier"}</UserName>
+                  <UserEmail>{userProfile.email}</UserEmail>
+                </UserDetails>
+              </UserInfoBox>
+              <FileHint>
+                L'événement sera proposé avec ce compte. Vous serez identifié comme organisateur.
+              </FileHint>
+            </Field>
+          ) : (
+            <Field>
+              <NotConnectedBox>
+                🔒 Vous devez être connecté pour proposer un événement.
+              </NotConnectedBox>
+            </Field>
+          )}
+
+          <Button onClick={handleSubmit} disabled={loading || profileLoading || !userProfile}>
             {loading
               ? uploadingImage ? "Envoi de l'image..." : "Envoi en cours..."
+              : !userProfile && !profileLoading
+              ? "Connectez-vous pour proposer"
               : "Envoyer la proposition"}
           </Button>
 

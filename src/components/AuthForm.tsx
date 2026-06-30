@@ -8,6 +8,8 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   sendEmailVerification,
+  signInWithPopup,
+  GoogleAuthProvider,
 } from "firebase/auth";
 import {
   doc,
@@ -115,9 +117,16 @@ const Label = styled.label`
   letter-spacing: 0.05em;
 `;
 
+const InputWrapper = styled.div`
+  position: relative;
+  display: flex;
+  align-items: center;
+`;
+
 const Input = styled.input`
   width: 100%;
   padding: 0.7rem 1rem;
+  padding-right: 2.5rem;
   border-radius: 10px;
   border: 1px solid rgba(255,255,255,0.1);
   background: rgba(255,255,255,0.06);
@@ -132,6 +141,29 @@ const Input = styled.input`
   &:focus {
     border-color: rgba(160,120,255,0.6);
     background: rgba(255,255,255,0.08);
+  }
+`;
+
+const PasswordToggle = styled.button`
+  position: absolute;
+  right: 12px;
+  background: none;
+  border: none;
+  color: rgba(255,255,255,0.4);
+  cursor: pointer;
+  font-size: 1.1rem;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s;
+
+  &:hover {
+    color: rgba(255,255,255,0.6);
+  }
+
+  &:active {
+    color: rgba(160,120,255,0.8);
   }
 `;
 
@@ -201,6 +233,38 @@ const SubmitBtn = styled.button`
   &:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+`;
+
+const GoogleBtn = styled.button`
+  width: 100%;
+  padding: 0.8rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.2);
+  background: rgba(255,255,255,0.08);
+  color: white;
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+
+  &:hover:not(:disabled) {
+    background: rgba(255,255,255,0.12);
+    border-color: rgba(255,255,255,0.3);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  svg {
+    width: 18px;
+    height: 18px;
   }
 `;
 
@@ -288,15 +352,21 @@ const ErrorBox = styled.div`
 export default function AuthForm({ mode, redirectTo = "/" }: Props) {
   const router = useRouter();
 
+  // ─── États du formulaire ───────────────────────────────────────────────
+
   const [prenom, setPrenom]                   = useState("");
   const [nom, setNom]                         = useState("");
   const [role, setRole]                       = useState<RoleChoice>("joueur");
   const [email, setEmail]                     = useState("");
   const [password, setPassword]               = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword]       = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError]                     = useState("");
   const [success, setSuccess]                 = useState("");
   const [loading, setLoading]                 = useState(false);
+
+  // ─── Fonction pour traduire les erreurs Firebase ────────────────────────
 
   function translateError(err: any): string {
     const code = err?.code as string | undefined;
@@ -307,12 +377,77 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
     if (code === "auth/wrong-password" || code === "auth/invalid-credential") return "Email ou mot de passe incorrect.";
     if (code === "auth/user-not-found") return "Aucun compte associé à cet email.";
     if (code === "auth/too-many-requests") return "Trop de tentatives. Réessayez plus tard.";
+    if (code === "auth/popup-closed-by-user") return "Connexion Google annulée.";
     if (code === "permission-denied" || err?.message?.includes("permissions")) {
       return "Impossible de finaliser cette action pour le moment. Contactez le support si le problème persiste.";
     }
 
     return err?.message || "Une erreur est survenue. Veuillez réessayer.";
   }
+
+  // ─── Fonction pour gérer la connexion Google ──────────────────────────────
+
+  async function handleGoogleSignIn() {
+    try {
+      setError("");
+      setLoading(true);
+
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: "select_account" });
+
+      const result = await signInWithPopup(auth, provider);
+      const user = result.user;
+
+      // Vérifier si l'utilisateur existe en Firestore
+      const userDoc = await getDoc(doc(db, "users", user.uid));
+
+      if (!userDoc.exists()) {
+        // Créer le profil utilisateur (première connexion Google)
+        const [prenom, ...nomParts] = (user.displayName || "").split(" ");
+        const userNom = nomParts.join(" ") || "Utilisateur";
+
+        await setDoc(doc(db, "users", user.uid), {
+          uid: user.uid,
+          prenom: prenom || "",
+          nom: userNom,
+          pseudo: user.displayName || "",
+          email: user.email || "",
+          role: "joueur",
+          isMJ: false,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          avatar: user.photoURL || "",
+          bio: "",
+          emailVerified: user.emailVerified,
+          status: "pending", // En attente de validation admin
+        });
+      }
+
+      // Récupérer les données de l'utilisateur
+      const userData = userDoc.exists() ? userDoc.data() : (await getDoc(doc(db, "users", user.uid))).data();
+
+      // Vérifier le statut du compte
+      if (userData?.status === "pending") {
+        await signOut(auth);
+        throw new Error(
+          "Votre compte est en attente de validation par un administrateur. Vous recevrez un accès dès qu'il sera validé."
+        );
+      }
+
+      if (userData?.status === "suspended") {
+        await signOut(auth);
+        throw new Error("Votre compte a été suspendu. Contactez un administrateur.");
+      }
+
+      router.push(redirectTo);
+    } catch (err: any) {
+      setError(translateError(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // ─── Fonction pour gérer l'inscription/connexion ────────────────────────
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -322,11 +457,13 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
       setLoading(true);
 
       if (mode === "register") {
+        // ─── Validation des champs ─────────────────────────────────────
         if (!prenom.trim()) throw new Error("Le prénom est obligatoire.");
         if (!nom.trim()) throw new Error("Le nom est obligatoire.");
         if (password.length < 8) throw new Error("Le mot de passe doit contenir au moins 8 caractères.");
         if (password !== confirmPassword) throw new Error("Les mots de passe ne correspondent pas.");
 
+        // ─── Créer le compte utilisateur ───────────────────────────────
         const credential = await createUserWithEmailAndPassword(auth, email, password);
 
         try {
@@ -334,25 +471,29 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
           await sendEmailVerification(credential.user);
 
           // Email de bienvenue custom (optionnel, via votre API)
-          await fetch("/api/register-email", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ email, prenom, nom }),
-          });
+          try {
+            await fetch("/api/register-email", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ email, prenom, nom, role }),
+            });
+          } catch (emailError) {
+            console.warn("Erreur lors de l'envoi de l'email de bienvenue:", emailError);
+          }
 
+          // Créer le document utilisateur en Firestore
           await setDoc(doc(db, "users", credential.user.uid), {
             uid: credential.user.uid,
             prenom,
             nom,
             pseudo: `${prenom} ${nom}`,
-            email,
-            // droits : "mj" peut créer des événements/parties ET s'inscrire
-            // "joueur" peut uniquement s'inscrire aux parties
+            email: email.toLowerCase(),
             role,
             isMJ: role === "mj",
             // Le compte doit être validé par un admin avant de devenir "active"
             status: "pending",
             createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
             avatar: "",
             bio: "",
             emailVerified: false,
@@ -369,6 +510,7 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
         setTimeout(() => router.push("/login"), 6000);
 
       } else {
+        // ─── Mode Login ────────────────────────────────────────────────
         const credential = await signInWithEmailAndPassword(auth, email, password);
 
         const userSnap = await getDoc(doc(db, "users", credential.user.uid));
@@ -490,27 +632,47 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
 
             <Field>
               <Label htmlFor="password">Mot de passe</Label>
-              <Input
-                id="password"
-                type="password"
-                placeholder={isLogin ? "••••••••" : "8 caractères minimum"}
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                required
-              />
+              <InputWrapper>
+                <Input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  placeholder={isLogin ? "••••••••" : "8 caractères minimum"}
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  required
+                />
+                <PasswordToggle
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  title={showPassword ? "Masquer" : "Afficher"}
+                  tabIndex={-1}
+                >
+                  {showPassword ? "👁️" : "👁️‍🗨️"}
+                </PasswordToggle>
+              </InputWrapper>
             </Field>
 
             {!isLogin && (
               <Field>
                 <Label htmlFor="confirm">Confirmer le mot de passe</Label>
-                <Input
-                  id="confirm"
-                  type="password"
-                  placeholder="••••••••"
-                  value={confirmPassword}
-                  onChange={e => setConfirmPassword(e.target.value)}
-                  required
-                />
+                <InputWrapper>
+                  <Input
+                    id="confirm"
+                    type={showConfirmPassword ? "text" : "password"}
+                    placeholder="••••••••"
+                    value={confirmPassword}
+                    onChange={e => setConfirmPassword(e.target.value)}
+                    required
+                  />
+                  <PasswordToggle
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    title={showConfirmPassword ? "Masquer" : "Afficher"}
+                    tabIndex={-1}
+                  >
+                    {showConfirmPassword ? "👁️" : "👁️‍🗨️"}
+                  </PasswordToggle>
+                </InputWrapper>
               </Field>
             )}
 
@@ -523,6 +685,20 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
             </SubmitBtn>
 
             <Divider><span>ou</span></Divider>
+
+            <GoogleBtn
+              type="button"
+              onClick={handleGoogleSignIn}
+              disabled={loading}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+              </svg>
+              Continuer avec Google
+            </GoogleBtn>
 
             <SwitchLink>
               {isLogin ? (

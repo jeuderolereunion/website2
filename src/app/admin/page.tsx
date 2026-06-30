@@ -46,6 +46,19 @@ type Ressource = {
   url: string;
 };
 
+// Ressource proposée par un utilisateur, en attente de validation admin
+type PropositionRessource = {
+  id: string;
+  titre: string;
+  type: TypeRessource;
+  univers: string;
+  taille: string;
+  url: string;
+  auteur?: string;
+  email?: string;
+  createdAt?: any;
+};
+
 type PendingUser = {
   id: string;
   prenom?: string;
@@ -498,6 +511,37 @@ const Loading = styled.p`
   font-size: 0.9rem;
 `;
 
+// Sous-section "propositions de ressources en attente" dans l'onglet Ressources
+const SubSection = styled.div`
+  margin-bottom: 2rem;
+`;
+
+const SubSectionTitle = styled.h3`
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: rgba(255,200,120,1);
+  margin-bottom: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+`;
+
+const PropositionCard = styled.div`
+  background: rgba(255,180,80,0.05);
+  border: 1px solid rgba(255,180,80,0.2);
+  border-radius: 14px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 0.75rem;
+`;
+
+const PropositionHeader = styled.div`
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+`;
+
 // ─── Composant principal ──────────────────────────────────────────────────────
 
 export default function AdminPage() {
@@ -515,6 +559,10 @@ export default function AdminPage() {
   const [form, setForm]                   = useState(FORM_VIDE);
   const [submitting, setSubmitting]       = useState(false);
   const [message, setMessage]             = useState<{ type: "ok" | "err"; text: string } | null>(null);
+
+  // ── État propositions de ressources (soumises par les utilisateurs) ───────
+  const [propositionsRessources, setPropositionsRessources] = useState<PropositionRessource[]>([]);
+  const [loadingPropRes, setLoadingPropRes]                 = useState(true);
 
   // ── État comptes en attente ───────────────────────────────────────────────
   const [pendingUsers, setPendingUsers]   = useState<PendingUser[]>([]);
@@ -539,6 +587,7 @@ export default function AdminPage() {
       setCheckingAuth(false);
       chargerPropositions();
       chargerRessources();
+      chargerPropositionsRessources();
       chargerComptesEnAttente();
     });
     return () => unsub();
@@ -558,6 +607,13 @@ export default function AdminPage() {
     const snap = await getDocs(collection(db, "ressources"));
     setRessources(snap.docs.map(d => ({ id: d.id, ...d.data() })) as Ressource[]);
     setLoadingRes(false);
+  }
+
+  async function chargerPropositionsRessources() {
+    setLoadingPropRes(true);
+    const snap = await getDocs(collection(db, "propositions_ressources"));
+    setPropositionsRessources(snap.docs.map(d => ({ id: d.id, ...d.data() })) as PropositionRessource[]);
+    setLoadingPropRes(false);
   }
 
   async function chargerComptesEnAttente() {
@@ -623,7 +679,7 @@ export default function AdminPage() {
     chargerPropositions();
   }
 
-  // ── Actions ressources ────────────────────────────────────────────────────
+  // ── Actions ressources (ajout direct par l'admin) ─────────────────────────
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -673,6 +729,38 @@ export default function AdminPage() {
   }
 }
 
+  // ── Actions propositions de ressources (soumises par les utilisateurs) ────
+
+  async function accepterRessource(proposition: PropositionRessource) {
+    try {
+      await addDoc(collection(db, "ressources"), {
+        titre: proposition.titre,
+        type: proposition.type,
+        univers: proposition.univers,
+        taille: proposition.taille,
+        url: proposition.url,
+        createdAt: serverTimestamp(),
+      });
+      await deleteDoc(doc(db, "propositions_ressources", proposition.id));
+      setPropositionsRessources(prev => prev.filter(p => p.id !== proposition.id));
+      chargerRessources();
+    } catch (err) {
+      console.error(err);
+      alert("Erreur lors de la validation de la ressource.");
+    }
+  }
+
+  async function refuserPropositionRessource(id: string) {
+    if (!confirm("Refuser cette proposition de ressource ?")) return;
+    try {
+      await deleteDoc(doc(db, "propositions_ressources", id));
+      setPropositionsRessources(prev => prev.filter(p => p.id !== id));
+    } catch (err) {
+      console.error(err);
+      alert("Erreur lors du refus de la ressource.");
+    }
+  }
+
   // ── Rendu ─────────────────────────────────────────────────────────────────
 
   if (checkingAuth) return null;
@@ -706,7 +794,7 @@ export default function AdminPage() {
           onClick={() => setOnglet("ressources")}
         >
           📚 Ressources
-          <Badge>{ressources.length}</Badge>
+          {propositionsRessources.length > 0 && <Badge>{propositionsRessources.length}</Badge>}
         </Tab>
       </Tabs>
 
@@ -808,7 +896,7 @@ export default function AdminPage() {
       {onglet === "ressources" && (
         <RessourcesLayout>
 
-          {/* Formulaire */}
+          {/* Formulaire d'ajout direct (par l'admin) */}
           <FormCard>
             <FormTitle>➕ Ajouter une ressource</FormTitle>
 
@@ -880,8 +968,56 @@ export default function AdminPage() {
             </form>
           </FormCard>
 
-          {/* Liste */}
+          {/* Liste + propositions en attente */}
           <div>
+
+            {/* Propositions soumises par les utilisateurs, en attente de validation */}
+            <SubSection>
+              <SubSectionTitle>
+                ⏳ Propositions en attente
+                {propositionsRessources.length > 0 && <Badge>{propositionsRessources.length}</Badge>}
+              </SubSectionTitle>
+
+              {loadingPropRes && <Loading>Chargement…</Loading>}
+
+              {!loadingPropRes && propositionsRessources.length === 0 && (
+                <Empty>Aucune proposition de ressource en attente.</Empty>
+              )}
+
+              {propositionsRessources.map(p => (
+                <PropositionCard key={p.id}>
+                  <PropositionHeader>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <ItemTitre>{p.titre}</ItemTitre>
+                      <ItemMeta>
+                        {p.univers} · {p.taille || "taille non renseignée"}
+                        {p.email ? ` · proposé par ${p.auteur || p.email}` : ""}
+                      </ItemMeta>
+                    </div>
+                    <TypePill>
+                      {TYPES_RESSOURCE.find(t => t.value === p.type)?.label ?? p.type}
+                    </TypePill>
+                  </PropositionHeader>
+
+                  <MetaRow>
+                    <LinkBtn href={p.url} target="_blank" rel="noopener noreferrer">
+                      🔗 Voir le lien
+                    </LinkBtn>
+                  </MetaRow>
+
+                  <Actions>
+                    <ValidateBtn onClick={() => accepterRessource(p)}>
+                      ✅ Valider
+                    </ValidateBtn>
+                    <RejectBtn onClick={() => refuserPropositionRessource(p.id)}>
+                      ❌ Refuser
+                    </RejectBtn>
+                  </Actions>
+                </PropositionCard>
+              ))}
+            </SubSection>
+
+            {/* Ressources déjà publiées */}
             <ListHeader>
               <ListTitle>Ressources en ligne</ListTitle>
               <ListCount>{ressources.length} fichier{ressources.length > 1 ? "s" : ""}</ListCount>

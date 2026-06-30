@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { db } from "@/lib/firebase";
 import { auth } from "@/lib/firebase";
 import { onAuthStateChanged, User } from "firebase/auth";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, getDocs, addDoc, serverTimestamp } from "firebase/firestore";
 import Navigation from "@/components/Navigation";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -66,6 +66,24 @@ const FILTRES: { label: string; value: TypeRessource | "tous" }[] = [
   { label: "Bestiaires",value: "bestiaire" },
   { label: "Scénarios", value: "scenario" },
 ];
+
+const UNIVERS_SUGGESTIONS = [
+  "Donjons & Dragons",
+  "Pathfinder",
+  "L'Appel de Cthulhu",
+  "Warhammer",
+  "Shadowrun",
+  "Star Wars",
+  "Cyberpunk Red",
+];
+
+const FORM_VIDE = {
+  titre: "",
+  type: "regles" as TypeRessource,
+  univers: "",
+  taille: "",
+  url: "",
+};
 
 // ─── Styled components ────────────────────────────────────────────────────────
 
@@ -150,6 +168,174 @@ const FilterBtn = styled.button<{ $active: boolean }>`
     color: white;
   }
 `;
+
+// ── Bouton "Proposer une ressource" + panneau ─────────────────────────────────
+
+const ProposerBarre = styled.div`
+  max-width: 1200px;
+  margin: 0 auto 2rem;
+  display: flex;
+  justify-content: flex-end;
+`;
+
+const ProposerBtn = styled.button`
+  padding: 0.6rem 1.1rem;
+  border-radius: 10px;
+  border: 1px solid rgba(160,120,255,0.35);
+  background: rgba(120,80,255,0.15);
+  color: rgba(190,165,255,1);
+  font-weight: 600;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+
+  &:hover { background: rgba(120,80,255,0.28); }
+`;
+
+const PanelOverlay = styled.div`
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  z-index: 50;
+`;
+
+const PanelCard = styled.div`
+  width: 100%;
+  max-width: 440px;
+  max-height: 90vh;
+  overflow-y: auto;
+  background: #15131f;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 16px;
+  padding: 1.5rem;
+  position: relative;
+`;
+
+const PanelCloseBtn = styled.button`
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.05);
+  color: rgba(255,255,255,0.5);
+  cursor: pointer;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+
+  &:hover { background: rgba(255,255,255,0.12); color: white; }
+`;
+
+const FormTitle = styled.h2`
+  font-size: 1.05rem;
+  font-weight: 700;
+  margin-bottom: 0.4rem;
+  padding-right: 2rem;
+`;
+
+const FormHint = styled.p`
+  font-size: 0.8rem;
+  color: rgba(255,255,255,0.45);
+  margin-bottom: 1.25rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+`;
+
+const Field = styled.div`
+  margin-bottom: 0.9rem;
+`;
+
+const Label = styled.label`
+  display: block;
+  font-size: 0.78rem;
+  color: rgba(255,255,255,0.45);
+  margin-bottom: 0.35rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+`;
+
+const Input = styled.input`
+  width: 100%;
+  padding: 0.6rem 0.85rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.06);
+  color: white;
+  font-size: 0.88rem;
+  outline: none;
+  transition: border-color 0.15s;
+
+  &::placeholder { color: rgba(255,255,255,0.2); }
+  &:focus { border-color: rgba(160,120,255,0.5); }
+`;
+
+const Select = styled.select`
+  width: 100%;
+  padding: 0.6rem 0.85rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(30,20,50,0.9);
+  color: white;
+  font-size: 0.88rem;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.15s;
+
+  &:focus { border-color: rgba(160,120,255,0.5); }
+`;
+
+const SubmitBtn = styled.button`
+  width: 100%;
+  padding: 0.75rem;
+  border-radius: 10px;
+  border: 1px solid rgba(160,120,255,0.3);
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 0.9rem;
+  background: rgba(120,80,255,0.2);
+  color: rgba(180,150,255,1);
+  transition: all 0.15s;
+  margin-top: 0.25rem;
+
+  &:hover:not(:disabled) { background: rgba(120,80,255,0.35); }
+  &:disabled { opacity: 0.5; cursor: not-allowed; }
+`;
+
+const SuccessMsg = styled.div`
+  margin-top: 0.65rem;
+  padding: 0.6rem 1rem;
+  border-radius: 8px;
+  background: rgba(0,200,100,0.1);
+  color: #5dff9d;
+  font-size: 0.82rem;
+  text-align: center;
+  border: 1px solid rgba(0,200,100,0.2);
+`;
+
+const ErrorMsg = styled.div`
+  margin-top: 0.65rem;
+  padding: 0.6rem 1rem;
+  border-radius: 8px;
+  background: rgba(255,80,80,0.1);
+  color: #ff7b7b;
+  font-size: 0.82rem;
+  text-align: center;
+  border: 1px solid rgba(255,80,80,0.2);
+`;
+
+// ── Bibliothèque ───────────────────────────────────────────────────────────────
 
 const Content = styled.div`
   max-width: 1200px;
@@ -301,11 +487,17 @@ const Loading = styled.p`
 // ─── Composant principal ──────────────────────────────────────────────────────
 
 export default function RessourcesPage() {
-    const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [ressources, setRessources] = useState<Ressource[]>([]);
   const [loading, setLoading] = useState(true);
   const [filtre, setFiltre] = useState<TypeRessource | "tous">("tous");
   const [recherche, setRecherche] = useState("");
+
+  // ── État panneau "Proposer une ressource" ──────────────────────────────────
+  const [panelOuvert, setPanelOuvert]   = useState(false);
+  const [form, setForm]                 = useState(FORM_VIDE);
+  const [submitting, setSubmitting]     = useState(false);
+  const [message, setMessage]           = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
   useEffect(() => {
     async function charger() {
@@ -326,12 +518,47 @@ export default function RessourcesPage() {
   }, []);
 
   useEffect(() => {
-  const unsub = onAuthStateChanged(auth, (firebaseUser) => {
-    setUser(firebaseUser);
-  });
+    const unsub = onAuthStateChanged(auth, (firebaseUser) => {
+      setUser(firebaseUser);
+    });
 
-  return () => unsub();
-}, []);
+    return () => unsub();
+  }, []);
+
+  function ouvrirPanel() {
+    setForm(FORM_VIDE);
+    setMessage(null);
+    setPanelOuvert(true);
+  }
+
+  function fermerPanel() {
+    setPanelOuvert(false);
+  }
+
+  async function handleSubmitProposition(e: React.FormEvent) {
+    e.preventDefault();
+    if (!form.titre || !form.univers || !form.url) {
+      setMessage({ type: "err", text: "Remplissez tous les champs obligatoires." });
+      return;
+    }
+    setSubmitting(true);
+    setMessage(null);
+    try {
+      await addDoc(collection(db, "propositions_ressources"), {
+        ...form,
+        email: user?.email || null,
+        auteur: user?.displayName || null,
+        createdAt: serverTimestamp(),
+      });
+      setMessage({ type: "ok", text: "Merci ! Votre ressource sera vérifiée par un administrateur avant publication." });
+      setForm(FORM_VIDE);
+    } catch (err) {
+      console.error(err);
+      setMessage({ type: "err", text: "Erreur lors de l'envoi de la proposition." });
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   // Filtrage
   const filtrees = ressources.filter(r => {
@@ -351,14 +578,22 @@ export default function RessourcesPage() {
   );
 
   return (
-    
+
     <Page>
-         
+
       <Hero>
        <Navigation />
         <Title>📚 Bibliothèque</Title>
         <Subtitle>Ressources pour vos jeux de rôle — fiches, règles, cartes et plus</Subtitle>
       </Hero>
+
+      {user && (
+        <ProposerBarre>
+          <ProposerBtn onClick={ouvrirPanel}>
+            ➕ Proposer une ressource
+          </ProposerBtn>
+        </ProposerBarre>
+      )}
 
       <Controls>
         <SearchInput
@@ -419,21 +654,21 @@ export default function RessourcesPage() {
                     <CardMeta>
                       <CardTaille>{r.taille}</CardTaille>
                       {user ? (
-  <DlBtn
-    href={r.url}
-    target="_blank"
-    rel="noopener noreferrer"
-  >
-    ↓ PDF
-  </DlBtn>
-) : (
-  <DlBtn
-  as="button"
-  disabled
->
-  🔒 Connectez-vous pour télécharger
-</DlBtn>
-)}
+                        <DlBtn
+                          href={r.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          ↓ PDF
+                        </DlBtn>
+                      ) : (
+                        <DlBtn
+                          as="button"
+                          disabled
+                        >
+                          🔒 Connectez-vous pour télécharger
+                        </DlBtn>
+                      )}
                     </CardMeta>
                   </Card>
                 ))}
@@ -442,6 +677,85 @@ export default function RessourcesPage() {
           );
         })}
       </Content>
+
+      {/* ── Panneau "Proposer une ressource" ── */}
+      {panelOuvert && (
+        <PanelOverlay onClick={fermerPanel}>
+          <PanelCard onClick={e => e.stopPropagation()}>
+            <PanelCloseBtn onClick={fermerPanel} aria-label="Fermer">✕</PanelCloseBtn>
+
+            <FormTitle>➕ Proposer une ressource</FormTitle>
+            <FormHint>Votre proposition sera vérifiée par un administrateur avant d'être publiée.</FormHint>
+
+            <form onSubmit={handleSubmitProposition}>
+              <Field>
+                <Label htmlFor="titre">Titre *</Label>
+                <Input
+                  id="titre"
+                  placeholder="Ex : Manuel du joueur v5"
+                  value={form.titre}
+                  onChange={e => setForm(f => ({ ...f, titre: e.target.value }))}
+                />
+              </Field>
+
+              <Field>
+                <Label htmlFor="type">Type *</Label>
+                <Select
+                  id="type"
+                  value={form.type}
+                  onChange={e => setForm(f => ({ ...f, type: e.target.value as TypeRessource }))}
+                >
+                  {Object.entries(TYPE_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </Select>
+              </Field>
+
+              <Field>
+                <Label htmlFor="univers">Univers *</Label>
+                <Input
+                  id="univers"
+                  list="univers-list-proposer"
+                  placeholder="Ex : Donjons & Dragons"
+                  value={form.univers}
+                  onChange={e => setForm(f => ({ ...f, univers: e.target.value }))}
+                />
+                <datalist id="univers-list-proposer">
+                  {UNIVERS_SUGGESTIONS.map(u => <option key={u} value={u} />)}
+                </datalist>
+              </Field>
+
+              <Field>
+                <Label htmlFor="taille">Taille du fichier</Label>
+                <Input
+                  id="taille"
+                  placeholder="Ex : 3.2 Mo"
+                  value={form.taille}
+                  onChange={e => setForm(f => ({ ...f, taille: e.target.value }))}
+                />
+              </Field>
+
+              <Field>
+                <Label htmlFor="url">Lien Mega *</Label>
+                <Input
+                  id="url"
+                  type="url"
+                  placeholder="https://mega.nz/file/..."
+                  value={form.url}
+                  onChange={e => setForm(f => ({ ...f, url: e.target.value }))}
+                />
+              </Field>
+
+              <SubmitBtn type="submit" disabled={submitting}>
+                {submitting ? "Envoi en cours…" : "Proposer la ressource"}
+              </SubmitBtn>
+
+              {message?.type === "ok"  && <SuccessMsg>{message.text}</SuccessMsg>}
+              {message?.type === "err" && <ErrorMsg>{message.text}</ErrorMsg>}
+            </form>
+          </PanelCard>
+        </PanelOverlay>
+      )}
     </Page>
   );
 }
