@@ -939,7 +939,7 @@ export default function EventPageClient({ slug }: { slug: string }) {
 
           <CardDate dateTime={event.date}>
   {formatDateFr(event.date)} · {event.heure}
-  {event.duree && ` · ${event.duree}`}
+ 
 </CardDate>
           <CardTitle>{event.titre}</CardTitle>
         </CardHeader>
