@@ -99,7 +99,7 @@ const BackLinkPlain = styled(Link)`
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  font-size: 0.85rem;
+  font-size: 0.95rem;
   color: rgba(160,120,255,0.9);
   text-decoration: none;
   margin-top: 0.5rem;
@@ -800,7 +800,16 @@ const CAT_LABELS: Record<string, string> = {
 function getInitiales(nom: string): string {
   return nom.split(" ").map(w => w[0]).filter(Boolean).slice(0, 2).join("").toUpperCase();
 }
+function formatDateFr(dateISO: string): string {
+  if (!dateISO) return "";
 
+  const [date] = dateISO.split("T");
+  const [y, m, d] = date.split("-");
+
+  if (!y || !m || !d) return dateISO;
+
+  return `${d}/${m}/${y}`;
+}
 // ─── Composant ────────────────────────────────────────────────────────────────
 
 export default function EventDetailClient({ slug, id }: { slug: string; id: string }) {
@@ -1165,7 +1174,7 @@ export default function EventDetailClient({ slug, id }: { slug: string; id: stri
         <CatPill>{CAT_LABELS[slug] ?? "Événement"}</CatPill>
         <HeroTitle>{event.titre}</HeroTitle>
         <HeroMeta>
-          <MetaItem>📅 {event.date}</MetaItem>
+          <MetaItem>📅 {formatDateFr(event.date)} </MetaItem>
           <MetaItem>🕐 {event.heure}{event.duree ? ` – ${event.duree}` : ""}</MetaItem>
           {lieuAffiche && (
             <MetaItem>{isOnline ? "💻" : "📍"} {isOnline ? "En ligne" : lieuAffiche}</MetaItem>
@@ -1352,7 +1361,7 @@ export default function EventDetailClient({ slug, id }: { slug: string; id: stri
                     : "S'inscrire"}
                 </ModalTitle>
                 <ModalSub>
-                  {selectedEvent.titre} · {selectedEvent.date} à {selectedEvent.heure}
+                  {formatDateFr(event.date)} · {event.heure}
                 </ModalSub>
 
                 {userProfile && (

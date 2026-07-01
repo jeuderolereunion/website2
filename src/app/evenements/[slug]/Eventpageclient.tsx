@@ -60,14 +60,19 @@ const Hero = styled.section`
 const BackLink = styled(Link)`
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
-  font-size: 0.82rem;
-  font-weight: 500;
-  color: rgba(255,255,255,0.5);
+  gap: 0.5rem;
+
+  font-size: 1rem;
+  font-weight: 700;
+
+  color: rgba(255,255,255,0.9);
   text-decoration: none;
   margin-bottom: 2rem;
   transition: color 150ms;
-  &:hover { color: rgba(255,255,255,0.85); }
+
+  &:hover {
+    color: #fff;
+  }
 `;
 
 const HeroIcon = styled.span`
@@ -476,12 +481,12 @@ const ModalActions = styled.div`
 
 const CancelBtn = styled.button`
   flex: 1;
-  padding: 0.6rem;
+  padding: 0.9rem;
   border-radius: 8px;
   border: 1px solid rgba(255,255,255,0.15);
   background: transparent;
   color: rgba(255,255,255,0.5);
-  font-size: 0.85rem;
+  font-size: 0.95rem;
   cursor: pointer;
   &:hover { background: rgba(255,255,255,0.05); }
 `;
@@ -514,7 +519,7 @@ const CalendarGlobal = createGlobalStyle`
     --fc-border-color: rgba(255,255,255,0.08);
     --fc-today-bg-color: rgba(160,120,255,0.1);
     
-    color: rgba(245, 245, 245, 0.93);
+    color: rgba(245, 245, 245, 0.9);
     font-family: inherit;
   }
   .fc-toolbar-title {
@@ -590,16 +595,37 @@ const CalendarWrapper = styled.div`
 `;
 
 const CalendarToggle = styled.button<{ $active: boolean }>`
-  padding: 0.4rem 1rem;
+  padding: 0.55rem 1.2rem;
   border-radius: 999px;
-  font-size: 0.8rem;
-  font-weight: 600;
+  font-size: 0.95rem;
+  font-weight: 700;
   cursor: pointer;
-  border: 1px solid ${p => p.$active ? "rgba(160,120,255,0.7)" : "rgba(255,255,255,0.15)"};
-  background: ${p => p.$active ? "rgba(120,80,255,0.2)" : "transparent"};
-  color: ${p => p.$active ? "#c8a8ff" : "rgba(255,255,255,0.5)"};
+
+  border: 1px solid
+    ${p => p.$active
+      ? "rgba(160,120,255,0.8)"
+      : "rgba(255,255,255,0.25)"};
+
+  background: ${p =>
+    p.$active
+      ? "rgba(83,45,209,0.95)"
+      : "rgba(255,255,255,0.05)"};
+
+  color: ${p =>
+    p.$active
+      ? "#fff"
+      : "rgba(255,255,255,0.85)"};
+
   transition: all 150ms;
   margin-bottom: 1.25rem;
+
+  &:hover {
+    background: ${p =>
+      p.$active
+        ? "rgba(83,45,209,1)"
+        : "rgba(255,255,255,0.12)"};
+    color: white;
+  }
 `;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
