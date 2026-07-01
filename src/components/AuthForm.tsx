@@ -347,6 +347,44 @@ const ErrorBox = styled.div`
   animation: ${fadeIn} 0.2s ease;
 `;
 
+// ─── Modale de choix de rôle (nouveaux comptes Google) ─────────────────────
+
+const ModalOverlay = styled.div`
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  padding: 1rem;
+`;
+
+const ModalCard = styled.div`
+  width: 100%;
+  max-width: 380px;
+  background: #16161f;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 18px;
+  padding: 1.75rem;
+  animation: ${fadeIn} 0.25s ease;
+`;
+
+const ModalTitle = styled.h2`
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: white;
+  margin-bottom: 0.35rem;
+  text-align: center;
+`;
+
+const ModalSubtitle = styled.p`
+  font-size: 0.85rem;
+  color: rgba(255,255,255,0.45);
+  text-align: center;
+  margin-bottom: 1.5rem;
+`;
+
 // ─── Composant ────────────────────────────────────────────────────────────────
 
 export default function AuthForm({ mode, redirectTo = "/" }: Props) {
@@ -366,6 +404,14 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
   const [success, setSuccess]                 = useState("");
   const [loading, setLoading]                 = useState(false);
 
+  // ─── État pour la finalisation d'un compte Google (choix du rôle) ───────
+  // Un nouvel utilisateur Google n'a pas passé par le RoleGroup du formulaire
+  // register (surtout s'il vient de la page login) : on lui demande donc son
+  // rôle explicitement avant de créer le document Firestore, au lieu de le
+  // forcer silencieusement à "joueur".
+  const [pendingGoogleUser, setPendingGoogleUser] = useState<any>(null);
+  const [googleRole, setGoogleRole]               = useState<RoleChoice>("joueur");
+
   // ─── Fonction pour traduire les erreurs Firebase ────────────────────────
 
   function translateError(err: any): string {
@@ -378,11 +424,42 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
     if (code === "auth/user-not-found") return "Aucun compte associé à cet email.";
     if (code === "auth/too-many-requests") return "Trop de tentatives. Réessayez plus tard.";
     if (code === "auth/popup-closed-by-user") return "Connexion Google annulée.";
+    if (code === "auth/popup-blocked") return "La fenêtre Google a été bloquée par le navigateur. Autorisez les popups et réessayez.";
     if (code === "permission-denied" || err?.message?.includes("permissions")) {
       return "Impossible de finaliser cette action pour le moment. Contactez le support si le problème persiste.";
     }
 
     return err?.message || "Une erreur est survenue. Veuillez réessayer.";
+  }
+
+  // ─── Crée le profil Firestore pour un utilisateur Google + redirige ─────
+
+  async function finalizeGoogleProfile(user: any, chosenRole: RoleChoice) {
+    const [prenom, ...nomParts] = (user.displayName || "").split(" ");
+    const userNom = nomParts.join(" ") || "Utilisateur";
+
+    await setDoc(doc(db, "users", user.uid), {
+      uid: user.uid,
+      prenom: prenom || "",
+      nom: userNom,
+      pseudo: user.displayName || "",
+      email: user.email || "",
+      role: chosenRole,
+      isMJ: chosenRole === "mj",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      avatar: user.photoURL || "",
+      bio: "",
+      emailVerified: user.emailVerified,
+      status: "pending", // En attente de validation admin
+    });
+
+    // Compte fraîchement créé et en attente : on informe l'utilisateur puis
+    // on le déconnecte, cohérent avec le flux email/mot de passe.
+    await signOut(auth);
+    setPendingGoogleUser(null);
+    setSuccess("ok");
+    setTimeout(() => router.push("/login"), 6000);
   }
 
   // ─── Fonction pour gérer la connexion Google ──────────────────────────────
@@ -398,35 +475,29 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
 
-      // Vérifier si l'utilisateur existe en Firestore
+      // Vérifier si l'utilisateur existe déjà en Firestore
       const userDoc = await getDoc(doc(db, "users", user.uid));
 
       if (!userDoc.exists()) {
-        // Créer le profil utilisateur (première connexion Google)
-        const [prenom, ...nomParts] = (user.displayName || "").split(" ");
-        const userNom = nomParts.join(" ") || "Utilisateur";
-
-        await setDoc(doc(db, "users", user.uid), {
-          uid: user.uid,
-          prenom: prenom || "",
-          nom: userNom,
-          pseudo: user.displayName || "",
-          email: user.email || "",
-          role: "joueur",
-          isMJ: false,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-          avatar: user.photoURL || "",
-          bio: "",
-          emailVerified: user.emailVerified,
-          status: "pending", // En attente de validation admin
-        });
+        // ─── Nouveau compte via Google ───────────────────────────────
+        if (mode === "register") {
+          // Le rôle a déjà été choisi dans le RoleGroup du formulaire
+          // register : on l'utilise directement, pas besoin de re-demander.
+          await finalizeGoogleProfile(user, role);
+        } else {
+          // Depuis la page login on n'a pas de RoleGroup affiché : on
+          // demande explicitement le rôle avant d'écrire quoi que ce soit
+          // en Firestore. Le compte Auth existe déjà mais reste sans
+          // profil tant que la modale n'est pas validée.
+          setPendingGoogleUser(user);
+          setLoading(false);
+        }
+        return;
       }
 
-      // Récupérer les données de l'utilisateur
-      const userData = userDoc.exists() ? userDoc.data() : (await getDoc(doc(db, "users", user.uid))).data();
+      // ─── Compte existant : vérifier son statut ───────────────────────
+      const userData = userDoc.data();
 
-      // Vérifier le statut du compte
       if (userData?.status === "pending") {
         await signOut(auth);
         throw new Error(
@@ -445,6 +516,28 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
     } finally {
       setLoading(false);
     }
+  }
+
+  // ─── Validation de la modale de choix de rôle (nouveau compte Google) ───
+
+  async function handleConfirmGoogleRole() {
+    if (!pendingGoogleUser) return;
+    try {
+      setError("");
+      setLoading(true);
+      await finalizeGoogleProfile(pendingGoogleUser, googleRole);
+    } catch (err: any) {
+      setError(translateError(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleCancelGoogleRole() {
+    // L'utilisateur ferme la modale sans choisir : on annule proprement,
+    // aucun document Firestore n'a été créé, on déconnecte le compte Auth.
+    await signOut(auth).catch(() => {});
+    setPendingGoogleUser(null);
   }
 
   // ─── Fonction pour gérer l'inscription/connexion ────────────────────────
@@ -711,6 +804,57 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
           </Form>
         )}
       </Card>
+
+      {pendingGoogleUser && (
+        <ModalOverlay>
+          <ModalCard>
+            <ModalTitle>Dernière étape 🎲</ModalTitle>
+            <ModalSubtitle>
+              Comment souhaitez-vous rejoindre JDR Réunion&nbsp;?
+            </ModalSubtitle>
+
+            <RoleGroup>
+              <RoleCard $active={googleRole === "joueur"}>
+                <input
+                  type="radio"
+                  name="googleRole"
+                  value="joueur"
+                  checked={googleRole === "joueur"}
+                  onChange={() => setGoogleRole("joueur")}
+                />
+                <strong>🎲 Joueur</strong>
+                <span>Rejoindre des parties organisées par d'autres</span>
+              </RoleCard>
+              <RoleCard $active={googleRole === "mj"}>
+                <input
+                  type="radio"
+                  name="googleRole"
+                  value="mj"
+                  checked={googleRole === "mj"}
+                  onChange={() => setGoogleRole("mj")}
+                />
+                <strong>🧙 MJ &amp; Joueur</strong>
+                <span>Créer des événements de parties et aussi y participer</span>
+              </RoleCard>
+            </RoleGroup>
+
+            {error && <ErrorBox>{error}</ErrorBox>}
+
+            <SubmitBtn
+              type="button"
+              disabled={loading}
+              onClick={handleConfirmGoogleRole}
+              style={{ marginTop: "1.25rem" }}
+            >
+              {loading ? <><Spinner /> Création…</> : "Confirmer"}
+            </SubmitBtn>
+
+            <SwitchLink>
+              <a onClick={handleCancelGoogleRole}>Annuler</a>
+            </SwitchLink>
+          </ModalCard>
+        </ModalOverlay>
+      )}
     </Wrapper>
   );
 }
