@@ -186,14 +186,14 @@ const Card = styled.article`
 `;
 
 const CardHeader = styled.div<{ $bgImage?: string }>`
-  padding: 1rem 1.1rem 0.75rem;
+  padding: 2.1rem 1.1rem 0.75rem;  /* ← padding-top augmenté pour dégager les badges */
   background: ${p =>
     p.$bgImage
       ? `linear-gradient(180deg, rgba(13,13,20,0.15) 0%, rgba(13,13,20,0.88) 100%), url(${p.$bgImage})`
       : "linear-gradient(135deg, rgba(80,60,160,0.3) 0%, rgba(40,30,80,0.1) 100%)"};
   background-size: cover;
   background-position: center;
-  min-height: ${p => (p.$bgImage ? "130px" : "auto")};
+  min-height: ${p => (p.$bgImage ? "130px" : "96px")};  /* ← min-height garanti même sans image */
   display: flex;
   flex-direction: column;
   justify-content: flex-end;

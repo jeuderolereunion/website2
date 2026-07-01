@@ -159,7 +159,7 @@ const MetaItem = styled.span`
   color: rgba(255,255,255,0.6);
   display: flex;
   align-items: center;
-  gap: 0.3rem;
+  gap: 0.6rem;
 `;
 
 const Body = styled.div`
@@ -279,11 +279,11 @@ const EmptyGallery = styled.div`
   height: 80px;
   border-radius: 10px;
   background: rgba(255,255,255,0.04);
-  border: 0.5px dashed rgba(255,255,255,0.12);
+  border: 0.6px dashed rgba(255,255,255,0.12);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: rgba(255,255,255,0.3);
+  color: rgba(255,255,255,0.7);
   font-size: 0.8rem;
   text-align: center;
   padding: 0 1rem;
