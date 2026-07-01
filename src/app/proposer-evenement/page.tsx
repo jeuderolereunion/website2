@@ -369,6 +369,14 @@ const SYSTEMES = [
   "Autre",
 ];
 
+// ─── Géolocalisation (autocomplétion d'adresse) ──────────────────────────────
+
+// Coordonnées approximatives du centre de La Réunion, utilisées pour biaiser
+// l'autocomplétion d'adresse (API BAN - data.gouv.fr) vers les résultats
+// locaux plutôt que les meilleurs matchs nationaux (souvent en Métropole).
+const REUNION_LAT = -21.115141;
+const REUNION_LON = 55.536384;
+
 // ─── Composant ────────────────────────────────────────────────────────────────
 
 type UserProfile = {
@@ -450,16 +458,23 @@ export default function ProposerEvenementPage() {
     niveau:       "Débutant",
     places:       6,
     // ── Nouveaux champs ──────────────────────────────────────────────────
-    lieuType:     "presentiel" as "presentiel" | "ligne", // ← présentiel ou en ligne
-    lieuDetail:   "",            // ← adresse OU plateforme (Discord, Roll20, Foundry...)
-    duree:        "2-3h",        // ← durée estimée de la session
-    personnages:  "pretires" as "pretires" | "creation",  // ← prétirés ou création à la table
-    ageTag:       "tous" as "tous" | "16" | "18",          // ← tag âge/contenu sensible
+    lieuType:       "presentiel" as "presentiel" | "ligne", // ← présentiel ou en ligne
+    lieuDetail:     "",          // ← adresse OU plateforme (Discord, Roll20, Foundry...)
+    lieuComplement: "",          // ← bâtiment, étage, digicode, point de repère...
+    duree:          "2-3h",      // ← durée estimée de la session
+    personnages:    "pretires" as "pretires" | "creation",  // ← prétirés ou création à la table
+    ageTag:         "tous" as "tous" | "16" | "18",          // ← tag âge/contenu sensible
   });
 
   // ⚠️ Appelle l'API Adresse gouv.fr avec un debounce de 300ms pour éviter
   // de spammer l'API à chaque frappe. N'interroge que si on est en mode
   // "Présentiel" et que le texte fait au moins 3 caractères.
+  //
+  // ⚠️ FIX : on passe lat/lon (centre de La Réunion) pour biaiser les
+  // résultats géographiquement, et on trie ensuite les résultats en
+  // priorisant ceux dont le code postal commence par 974 (La Réunion),
+  // car l'API BAN peut malgré tout renvoyer des adresses métropolitaines
+  // mieux "scorées" textuellement.
   function handleAddressChange(value: string) {
     setForm(f => ({ ...f, lieuDetail: value }));
 
@@ -478,14 +493,22 @@ export default function ProposerEvenementPage() {
       setAddressLoading(true);
       try {
         const res = await fetch(
-          `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(value)}&limit=5`,
+          `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(value)}&lat=${REUNION_LAT}&lon=${REUNION_LON}&limit=8`,
           { signal: controller.signal }
         );
         if (!res.ok) throw new Error("Échec de la recherche d'adresse.");
         const data = await res.json();
-        const labels: string[] = (data.features || []).map(
-          (f: any) => f.properties.label as string
-        );
+        const features: any[] = data.features || [];
+
+        const isReunion = (f: any) =>
+          String(f.properties.postcode || f.properties.citycode || "").startsWith("974");
+
+        const sorted = [
+          ...features.filter(isReunion),
+          ...features.filter(f => !isReunion(f)),
+        ].slice(0, 5);
+
+        const labels: string[] = sorted.map((f: any) => f.properties.label as string);
         setAddressSuggestions(labels);
         setShowSuggestions(labels.length > 0);
       } catch (err: any) {
@@ -616,11 +639,12 @@ export default function ProposerEvenementPage() {
         createdAt:    serverTimestamp(),
         mjId:         uid,
         // ── Nouveaux champs ──────────────────────────────────────────────
-        lieuType:     form.lieuType,     // ← "presentiel" ou "ligne"
-        lieuDetail:   form.lieuDetail,   // ← adresse ou plateforme
-        duree:        form.duree,        // ← durée estimée
-        personnages:  form.personnages,  // ← "pretires" ou "creation"
-        ageTag:       form.ageTag,       // ← "tous" / "16" / "18"
+        lieuType:       form.lieuType,       // ← "presentiel" ou "ligne"
+        lieuDetail:     form.lieuDetail,     // ← adresse ou plateforme
+        lieuComplement: form.lieuComplement, // ← bâtiment, étage, digicode...
+        duree:          form.duree,          // ← durée estimée
+        personnages:    form.personnages,    // ← "pretires" ou "creation"
+        ageTag:         form.ageTag,         // ← "tous" / "16" / "18"
       });
 
       setSuccess(true);
@@ -631,7 +655,7 @@ export default function ProposerEvenementPage() {
         type: "one-shot", systeme: "", systemeAutre: "",
         date: "", heure: "", niveau: "Débutant",
         places: 6,
-        lieuType: "presentiel", lieuDetail: "", duree: "2-3h",
+        lieuType: "presentiel", lieuDetail: "", lieuComplement: "", duree: "2-3h",
         personnages: "pretires", ageTag: "tous",
       });
       setImageFile(null);
@@ -764,7 +788,7 @@ export default function ProposerEvenementPage() {
                   onChange={e => handleAddressChange(e.target.value)}
                   onFocus={() => { if (addressSuggestions.length > 0) setShowSuggestions(true); }}
                   onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
-                  placeholder="Commencez à taper une adresse... (Ex: 12 rue des Tavernes, Paris)"
+                  placeholder="Commencez à taper une adresse... (Ex: 12 rue des Tavernes, Saint-Denis)"
                   autoComplete="off"
                 />
                 {addressLoading && <AddressLoading>⏳</AddressLoading>}
@@ -789,6 +813,18 @@ export default function ProposerEvenementPage() {
               />
             )}
           </Field>
+
+          {/* Complément d'adresse : uniquement pertinent en présentiel */}
+          {form.lieuType === "presentiel" && (
+            <Field>
+              <Label>Complément d'adresse (optionnel)</Label>
+              <Input
+                value={form.lieuComplement}
+                onChange={e => setForm({ ...form, lieuComplement: e.target.value })}
+                placeholder="Ex: Bâtiment B, 2ème étage, digicode 1234, sonner à Dupont..."
+              />
+            </Field>
+          )}
 
           {/* Date & heure */}
           <SectionTitle>Date & horaires</SectionTitle>
