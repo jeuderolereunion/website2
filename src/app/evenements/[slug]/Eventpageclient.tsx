@@ -513,8 +513,8 @@ const CalendarGlobal = createGlobalStyle`
   .fc {
     --fc-border-color: rgba(255,255,255,0.08);
     --fc-today-bg-color: rgba(160,120,255,0.1);
-    --fc-page-bg-color: transparent;
-    color: rgba(255,255,255,0.85);
+    
+    color: rgba(245, 245, 245, 0.93);
     font-family: inherit;
   }
   .fc-toolbar-title {
