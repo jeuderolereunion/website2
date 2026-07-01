@@ -647,6 +647,15 @@ const TYPE_COLORS: Record<string, string> = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+
+// Convertit une date ISO "AAAA-MM-JJ" (stockée en base, format natif <input type="date">)
+// en format français "JJ/MM/AAAA" pour l'affichage.
+function formatDateFr(dateISO: string): string {
+  if (!dateISO) return "";
+  const [y, m, d] = dateISO.split("-");
+  if (!y || !m || !d) return dateISO; // filet de sécurité si le format est inattendu
+  return `${d}/${m}/${y}`;
+}
 function getInitiales(nom: string): string {
   return nom
     .split(" ")
@@ -929,9 +938,9 @@ export default function EventPageClient({ slug }: { slug: string }) {
           )}
 
           <CardDate dateTime={event.date}>
-            {event.date} · {event.heure}
-            {event.duree && ` · ${event.duree}`}
-          </CardDate>
+  {formatDateFr(event.date)} · {event.heure}
+  {event.duree && ` · ${event.duree}`}
+</CardDate>
           <CardTitle>{event.titre}</CardTitle>
         </CardHeader>
 
