@@ -130,7 +130,7 @@ const FiltersRow = styled.div`
   gap: 0.5rem;
   flex-wrap: wrap;
   padding: 0 1.5rem;
-  margin-bottom: 2.5rem;
+  margin-bottom: 1rem;
 `;
 
 const FilterBtn = styled.button<{ $active: boolean }>`
@@ -144,6 +144,33 @@ const FilterBtn = styled.button<{ $active: boolean }>`
   color: ${p => p.$active ? "#c8a8ff" : "rgba(255,255,255,0.5)"};
   transition: all 150ms;
   &:hover { border-color: rgba(160,120,255,0.5); color: #c8a8ff; }
+`;
+
+// Bouton de filtre secteur — même gabarit que FilterBtn, mais coloré
+// dynamiquement selon le secteur (nord/sud/est/ouest) quand actif.
+const SecteurBtn = styled.button<{ $active: boolean; $color: string }>`
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 1rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid ${p => p.$active ? p.$color : "rgba(255,255,255,0.15)"};
+  background: ${p => p.$active ? `${p.$color}26` : "transparent"};
+  color: ${p => p.$active ? p.$color : "rgba(255,255,255,0.5)"};
+  transition: all 150ms;
+  &:hover { border-color: ${p => p.$color}; color: ${p => p.$color}; }
+`;
+
+const SecteurFiltersRow = styled.div`
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0 1.5rem;
+  margin-bottom: 2.5rem;
 `;
 
 const Section = styled.section`
@@ -256,6 +283,25 @@ const CardTitle = styled.h3`
   font-weight: 700;
   margin: 0;
   line-height: 1.3;
+`;
+
+// Ville + secteur, affichés sous le titre de la carte.
+const CardLocation = styled.p`
+  font-size: 0.75rem;
+  color: rgba(255,255,255,0.5);
+  margin: 0.3rem 0 0;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+`;
+
+const SecteurDot = styled.span<{ $color: string }>`
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: ${p => p.$color};
+  flex-shrink: 0;
 `;
 
 const CardBody = styled.div`
@@ -630,6 +676,8 @@ const CalendarToggle = styled.button<{ $active: boolean }>`
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+type Secteur = "nord" | "sud" | "est" | "ouest";
+
 type EventDoc = {
   id: string;
   titre: string;
@@ -647,6 +695,8 @@ type EventDoc = {
   systeme?: string;
   tags?: string[];
   image?: string;
+  ville?: string;      // ex: "Saint-Denis", "Saint-Pierre"...
+  secteur?: string;     // optionnel — si absent, déduit de "ville"
 };
 
 type UserProfile = {
@@ -670,6 +720,81 @@ const TYPE_COLORS: Record<string, string> = {
   "initiations":  "#00bcd4",
   default:        "#5c6bc0",
 };
+
+// ─── Secteurs de La Réunion ────────────────────────────────────────────────────
+
+const SECTEUR_LABELS: Record<Secteur, string> = {
+  nord:  "Nord",
+  ouest: "Ouest",
+  sud:   "Sud",
+  est:   "Est",
+};
+
+const SECTEUR_COLORS: Record<Secteur, string> = {
+  nord:  "#4dd0e1",
+  ouest: "#ba68c8",
+  sud:   "#66bb6a",
+  est:   "#ffb74d",
+};
+
+// Répartition usuelle des communes de La Réunion par secteur.
+// Utilisée en repli lorsque l'événement n'a pas de champ "secteur" explicite.
+const VILLE_TO_SECTEUR: Record<string, Secteur> = {
+  "saint denis":            "nord",
+  "sainte marie":           "nord",
+  "sainte suzanne":         "nord",
+
+  "saint paul":             "ouest",
+  "le port":                "ouest",
+  "la possession":          "ouest",
+  "trois bassins":          "ouest",
+  "saint leu":              "ouest",
+  "les avirons":            "ouest",
+  "etang sale":             "ouest",
+
+  "saint pierre":           "sud",
+  "saint louis":            "sud",
+  "petite ile":             "sud",
+  "saint joseph":           "sud",
+  "saint philippe":         "sud",
+  "cilaos":                 "sud",
+  "entre deux":             "sud",
+  "le tampon":              "sud",
+
+  "saint benoit":           "est",
+  "saint andre":            "est",
+  "bras panon":             "est",
+  "salazie":                "est",
+  "plaine des palmistes":   "est",
+  "sainte rose":            "est",
+};
+
+// Normalise une chaîne pour la comparaison (accents, tirets, apostrophes, casse).
+function normalize(str: string): string {
+  return str
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[-'’]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Détermine le secteur d'un événement : priorité au champ "secteur" explicite,
+// sinon déduction à partir de la "ville" via la table de correspondance.
+function getSecteur(event: { ville?: string; secteur?: string }): Secteur | null {
+  if (event.secteur) {
+    const s = normalize(event.secteur) as Secteur;
+    if (s === "nord" || s === "sud" || s === "est" || s === "ouest") return s;
+  }
+  if (!event.ville) return null;
+  const key = normalize(event.ville);
+  if (VILLE_TO_SECTEUR[key]) return VILLE_TO_SECTEUR[key];
+  const match = Object.entries(VILLE_TO_SECTEUR).find(
+    ([ville]) => key.includes(ville) || ville.includes(key)
+  );
+  return match ? match[1] : null;
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -711,6 +836,7 @@ export default function EventPageClient({ slug }: { slug: string }) {
   const [events, setEvents]             = useState<EventDoc[]>([]);
   const [loading, setLoading]           = useState(true);
   const [filter, setFilter]             = useState<"all" | "upcoming" | "past">("all");
+  const [secteurFilter, setSecteurFilter] = useState<"all" | Secteur>("all");
   const [selectedEvent, setSelectedEvent] = useState<EventDoc | null>(null);
   const [submitting, setSubmitting]     = useState(false);
   const [success, setSuccess]           = useState(false);
@@ -804,6 +930,7 @@ export default function EventPageClient({ slug }: { slug: string }) {
 
   const fcEvents = events
     .filter(e => !!e.date)
+    .filter(e => secteurFilter === "all" || getSecteur(e) === secteurFilter)
     .map(e => ({
       id: e.id,
       title: e.titre,
@@ -929,8 +1056,9 @@ export default function EventPageClient({ slug }: { slug: string }) {
 
   const now      = new Date().toISOString().split("T")[0];
   const filtered = events.filter(e => {
-    if (filter === "upcoming") return e.date >= now;
-    if (filter === "past")     return e.date < now;
+    if (filter === "upcoming" && e.date < now) return false;
+    if (filter === "past"     && e.date >= now) return false;
+    if (secteurFilter !== "all" && getSecteur(e) !== secteurFilter) return false;
     return true;
   });
   const upcoming = filtered.filter(e => e.date >= now);
@@ -943,6 +1071,7 @@ export default function EventPageClient({ slug }: { slug: string }) {
     const complet         = placesDispo <= 0;
     const estOrganisateur = !!user && !!event.mjId && event.mjId === user.uid;
     const { status, label: statusLabel } = getStatusBadge(placesDispo);
+    const secteur = getSecteur(event);
 
     const mjNom = event.mjNom
       || (event.mjId ? mjProfiles[event.mjId] : null)
@@ -964,10 +1093,18 @@ export default function EventPageClient({ slug }: { slug: string }) {
           )}
 
           <CardDate dateTime={event.date}>
-  {formatDateFr(event.date)} · {event.heure}
- 
-</CardDate>
+            {formatDateFr(event.date)} · {event.heure}
+            
+          </CardDate>
           <CardTitle>{event.titre}</CardTitle>
+
+          {(event.ville || secteur) && (
+            <CardLocation>
+              {secteur && <SecteurDot $color={SECTEUR_COLORS[secteur]} />}
+              📍 {event.ville ?? SECTEUR_LABELS[secteur as Secteur]}
+              {event.ville && secteur ? ` · ${SECTEUR_LABELS[secteur]}` : ""}
+            </CardLocation>
+          )}
         </CardHeader>
 
         <CardBody>
@@ -1036,6 +1173,27 @@ export default function EventPageClient({ slug }: { slug: string }) {
           </FilterBtn>
         ))}
       </FiltersRow>
+
+      <SecteurFiltersRow>
+        <SecteurBtn
+          $active={secteurFilter === "all"}
+          $color="#c8a8ff"
+          onClick={() => setSecteurFilter("all")}
+        >
+          🏝️ Toute l&apos;île
+        </SecteurBtn>
+        {(Object.keys(SECTEUR_LABELS) as Secteur[]).map(s => (
+          <SecteurBtn
+            key={s}
+            $active={secteurFilter === s}
+            $color={SECTEUR_COLORS[s]}
+            onClick={() => setSecteurFilter(s)}
+          >
+            <SecteurDot $color={SECTEUR_COLORS[s]} />
+            {SECTEUR_LABELS[s]}
+          </SecteurBtn>
+        ))}
+      </SecteurFiltersRow>
 
       <CalendarGlobal />
 
@@ -1110,6 +1268,7 @@ export default function EventPageClient({ slug }: { slug: string }) {
 
                 <ModalSubtitle>
                   {selectedEvent.titre} · {selectedEvent.date} à {selectedEvent.heure}
+                  {selectedEvent.ville ? ` · ${selectedEvent.ville}` : ""}
                 </ModalSubtitle>
 
                 {userProfile && (

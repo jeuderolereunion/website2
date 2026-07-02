@@ -54,11 +54,19 @@ type EventDoc = {
   tags?: string[];
   lieu?: string;
   adresse?: string;
+  ville?: string;
   lieuDetail?: string;
   lieuType?: "presentiel" | "ligne";
   regles?: string[];
   photos?: string[];
   image?: string;
+};
+
+type AdresseSuggestion = {
+  label: string;
+  context: string;
+  city: string;
+  value: string;
 };
 
 type UserProfile = {
@@ -316,6 +324,62 @@ const ProgressBar = styled.div<{ $pct: number }>`
   background: rgba(255,255,255,0.08);
   overflow: hidden;
   position: relative;
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    width: ${p => p.$pct ?? 0}%;
+    background: linear-gradient(90deg, #7c4dff, #c8a8ff);
+    transition: width 150ms;
+  }
+`;
+
+// ── Couverture (image du Hero) ─────────────────────────────────────────────────
+
+const CoverPreviewWrap = styled.div`
+  position: relative;
+  width: 220px;
+  max-width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 0.5px solid rgba(255,255,255,0.08);
+`;
+
+const CoverPreviewImg = styled.div<{ $src: string }>`
+  position: absolute;
+  inset: 0;
+  background: url(${p => p.$src}) center/cover;
+`;
+
+const CoverUploadZone = styled.label`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  width: 220px;
+  max-width: 100%;
+  height: 64px;
+  border-radius: 10px;
+  background: rgba(120,80,255,0.07);
+  border: 1px dashed rgba(160,120,255,0.35);
+  color: rgba(160,120,255,0.8);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 150ms, border-color 150ms;
+  &:hover { background: rgba(120,80,255,0.14); border-color: rgba(160,120,255,0.6); }
+`;
+
+const CoverProgressBar = styled.div<{ $pct: number }>`
+  width: 220px;
+  max-width: 100%;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.08);
+  overflow: hidden;
+  position: relative;
+  margin-top: 0.4rem;
   &::after {
     content: '';
     position: absolute;
@@ -693,6 +757,11 @@ const Select = styled.select`
   box-sizing: border-box;
   cursor: pointer;
   &:focus { border-color: rgba(160,120,255,0.5); }
+
+  option {
+    background: #1a1a2e;
+    color: white;
+  }
 `;
 
 const EditSectionLabel = styled.p`
@@ -704,6 +773,12 @@ const EditSectionLabel = styled.p`
   margin: 1.1rem 0 0.6rem;
   grid-column: span 2;
   @media (max-width: 500px) { grid-column: span 1; }
+`;
+
+const HintText = styled.p`
+  font-size: 0.72rem;
+  color: rgba(255,255,255,0.35);
+  margin: 0.35rem 0 0;
 `;
 
 // ── Autocomplétion adresse ────────────────────────────────────────────────────
@@ -788,6 +863,48 @@ const SaveBtn = styled.button`
   &:disabled { opacity: 0.4; cursor: not-allowed; }
 `;
 
+// ─── Cloudinary config ────────────────────────────────────────────────────────
+// ⚠️ Adapte ces noms de variables d'env si ton projet utilise autre chose.
+const CLOUDINARY_CLOUD_NAME    = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME!;
+const CLOUDINARY_UPLOAD_PRESET = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET!;
+
+async function uploadToCloudinary(
+  file: File,
+  onProgress: (pct: number) => void
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open(
+      "POST",
+      `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`
+    );
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const data = JSON.parse(xhr.responseText);
+          resolve(data.secure_url as string);
+        } catch (err) {
+          reject(err);
+        }
+      } else {
+        reject(new Error(`Échec de l'upload Cloudinary (${xhr.status})`));
+      }
+    };
+    xhr.onerror = () => reject(new Error("Échec de l'upload Cloudinary"));
+
+    xhr.send(formData);
+  });
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const CAT_LABELS: Record<string, string> = {
@@ -810,6 +927,38 @@ function formatDateFr(dateISO: string): string {
 
   return `${d}/${m}/${y}`;
 }
+
+// ─── Communes de La Réunion (regroupées par secteur) ─────────────────────────
+// ⚠️ Les libellés doivent rester cohérents avec la table utilisée côté
+// formulaire de proposition d'événement (ProposerEvenementPage).
+
+const VILLES_PAR_SECTEUR: { secteur: string; villes: string[] }[] = [
+  { secteur: "Nord",  villes: ["Saint-Denis", "Sainte-Marie", "Sainte-Suzanne"] },
+  { secteur: "Ouest", villes: ["Saint-Paul", "Le Port", "La Possession", "Trois-Bassins", "Saint-Leu", "Les Avirons", "L'Étang-Salé"] },
+  { secteur: "Sud",   villes: ["Saint-Pierre", "Saint-Louis", "Petite-Île", "Saint-Joseph", "Saint-Philippe", "Cilaos", "Entre-Deux", "Le Tampon"] },
+  { secteur: "Est",   villes: ["Saint-Benoît", "Saint-André", "Bras-Panon", "Salazie", "La Plaine-des-Palmistes", "Sainte-Rose"] },
+];
+
+// Normalise une chaîne pour comparer une ville retournée par l'API Adresse
+// (souvent en majuscules, ex: "SAINT-DENIS") avec notre liste de référence.
+function normalizeVille(str: string): string {
+  return str
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[-'’]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const ALL_VILLES = VILLES_PAR_SECTEUR.flatMap(g => g.villes);
+
+function matchVille(cityFromApi: string): string | null {
+  const key = normalizeVille(cityFromApi);
+  const found = ALL_VILLES.find(v => normalizeVille(v) === key);
+  return found ?? null;
+}
+
 // ─── Composant ────────────────────────────────────────────────────────────────
 
 export default function EventDetailClient({ slug, id }: { slug: string; id: string }) {
@@ -834,10 +983,14 @@ export default function EventDetailClient({ slug, id }: { slug: string; id: stri
   // Partage
   const [shareFeedback, setShareFeedback] = useState<"idle" | "copied" | "error">("idle");
 
-  // Photo upload
+  // Photo upload (galerie)
   const fileInputRef  = useRef<HTMLInputElement>(null);
   const [uploadPct, setUploadPct]     = useState<number | null>(null);
   const [deletingUrl, setDeletingUrl] = useState<string | null>(null);
+
+  // Image de couverture (Hero) — Cloudinary
+  const coverInputRef = useRef<HTMLInputElement>(null);
+  const [coverUploadPct, setCoverUploadPct] = useState<number | null>(null);
 
   // Modal édition
   const [editOpen, setEditOpen]   = useState(false);
@@ -846,8 +999,9 @@ export default function EventDetailClient({ slug, id }: { slug: string; id: stri
   const [saving, setSaving]       = useState(false);
 
   // Autocomplétion adresse
-  const [adresseSuggestions, setAdresseSuggestions] = useState<{ label: string; context: string; value: string }[]>([]);
-  const adresseAbortRef = useRef<AbortController | null>(null);
+  // Autocomplétion adresse
+const [adresseSuggestions, setAdresseSuggestions] = useState<AdresseSuggestion[]>([]);
+const adresseAbortRef = useRef<AbortController | null>(null);
 
   // ── Chargement événement ──────────────────────────────────────────────────
 
@@ -995,7 +1149,7 @@ export default function EventDetailClient({ slug, id }: { slug: string; id: stri
     setTimeout(() => setShareFeedback("idle"), 2000);
   }
 
-  // ── Upload photo ──────────────────────────────────────────────────────────
+  // ── Upload photo (galerie) ──────────────────────────────────────────────────
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -1033,6 +1187,28 @@ export default function EventDetailClient({ slug, id }: { slug: string; id: stri
     }
   }
 
+  // ── Upload image de couverture (Cloudinary) ──────────────────────────────────
+
+  async function handleCoverChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setCoverUploadPct(0);
+    try {
+      const url = await uploadToCloudinary(file, setCoverUploadPct);
+      setEditForm(f => ({ ...f, image: url }));
+    } catch (err: any) {
+      alert("Erreur lors de l'upload de l'image : " + (err.message || "inconnue"));
+    } finally {
+      setCoverUploadPct(null);
+      if (coverInputRef.current) coverInputRef.current.value = "";
+    }
+  }
+
+  function removeCoverImage() {
+    setEditForm(f => ({ ...f, image: "" }));
+  }
+
   // ── Autocomplétion adresse ────────────────────────────────────────────────
 
   function handleAdresseChange(value: string) {
@@ -1052,7 +1228,8 @@ export default function EventDetailClient({ slug, id }: { slug: string; id: stri
         setAdresseSuggestions(
           (data.features ?? []).map((f: any) => ({
             label:   f.properties.name,
-            context: f.properties.context ?? f.properties.city ?? "",
+            context: f.properties.context ?? "",
+            city:    f.properties.city ?? "",
             value:   f.properties.label,
           }))
         );
@@ -1060,8 +1237,15 @@ export default function EventDetailClient({ slug, id }: { slug: string; id: stri
       .catch(() => {}); // ignore abort
   }
 
-  function selectAdresse(val: string) {
-    setEditForm(f => ({ ...f, adresse: val }));
+  // Quand une adresse est choisie, on essaie de faire correspondre la ville
+  // renvoyée par l'API à notre liste de référence pour pré-remplir le <select>.
+  function selectAdresse(val: string, cityFromApi?: string) {
+    const matched = cityFromApi ? matchVille(cityFromApi) : null;
+    setEditForm(f => ({
+      ...f,
+      adresse: val,
+      ville: matched ?? f.ville,
+    }));
     setAdresseSuggestions([]);
   }
 
@@ -1081,7 +1265,9 @@ export default function EventDetailClient({ slug, id }: { slug: string; id: stri
       tags:        event.tags ?? [],
       lieuType:    event.lieuType ?? "presentiel",
       adresse:     event.adresse ?? "",
+      ville:       event.ville ?? "",
       lieuDetail:  event.lieuDetail ?? "",
+      image:       event.image ?? "",
     });
     setEditRules(event.regles ?? []);
     setEditOpen(true);
@@ -1107,8 +1293,10 @@ export default function EventDetailClient({ slug, id }: { slug: string; id: stri
         tags:        tagsArr,
         lieuType:    editForm.lieuType,
         adresse:     editForm.adresse || "",
+        ville:       editForm.lieuType === "presentiel" ? (editForm.ville || "") : "",
         lieuDetail:  editForm.lieuDetail || "",
         regles:      editRules.filter(r => r.trim() !== ""),
+        image:       editForm.image || "",
       };
 
       await updateDoc(doc(db, "evenements", event.id), payload);
@@ -1152,7 +1340,13 @@ export default function EventDetailClient({ slug, id }: { slug: string; id: stri
   const placesDispo = event.places - (event.inscrits ?? 0);
   const complet     = placesDispo <= 0;
   const isOnline    = event.lieuType === "ligne";
-  const lieuAffiche = event.adresse || event.lieuDetail || event.lieu;
+
+  // Adresse + ville combinées pour l'affichage et la carte
+  const lieuAffiche =
+    [event.adresse, event.ville].filter(Boolean).join(", ") ||
+    event.lieuDetail ||
+    event.lieu;
+
   const mapsQuery   = encodeURIComponent(lieuAffiche || "Réunion");
   const mapsEmbed   = `https://maps.google.com/maps?q=${mapsQuery}&output=embed`;
   const mapsLink    = `https://maps.google.com/?q=${mapsQuery}`;
@@ -1421,6 +1615,36 @@ export default function EventDetailClient({ slug, id }: { slug: string; id: stri
             </ModalSub>
 
             <EditGrid>
+              {/* Image de couverture */}
+              <FieldFull>
+                <Label>Image de couverture</Label>
+                {editForm.image ? (
+                  <CoverPreviewWrap>
+                    <CoverPreviewImg $src={editForm.image} />
+                    <PhotoDeleteBtn
+                      className="photo-delete-btn"
+                      style={{ opacity: 1 }}
+                      onClick={removeCoverImage}
+                      title="Retirer l'image de couverture"
+                    >
+                      ✕
+                    </PhotoDeleteBtn>
+                  </CoverPreviewWrap>
+                ) : (
+                  <CoverUploadZone htmlFor="cover-upload">
+                    🖼️ Ajouter une image de couverture
+                    <UploadInput
+                      id="cover-upload"
+                      ref={coverInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleCoverChange}
+                    />
+                  </CoverUploadZone>
+                )}
+                {coverUploadPct !== null && <CoverProgressBar $pct={coverUploadPct} />}
+              </FieldFull>
+
               {/* Titre */}
               <FieldFull>
                 <Label>Titre</Label>
@@ -1526,28 +1750,50 @@ export default function EventDetailClient({ slug, id }: { slug: string; id: stri
               </FieldFull>
 
               {editForm.lieuType !== "ligne" ? (
-                <FieldFull>
-                  <Label>Adresse</Label>
-                  <AdresseWrapper>
-                    <Input
-                      value={editForm.adresse ?? ""}
-                      onChange={e => handleAdresseChange(e.target.value)}
-                      onBlur={() => setTimeout(() => setAdresseSuggestions([]), 180)}
-                      placeholder="12 rue des Aventuriers, Saint-Denis"
-                      autoComplete="off"
-                    />
-                    {adresseSuggestions.length > 0 && (
-                      <AdresseDropdown>
-                        {adresseSuggestions.map((s, i) => (
-                          <AdresseItem key={i} onMouseDown={() => selectAdresse(s.value)}>
-                            {s.label}
-                            {s.context && <AdresseSub>{s.context}</AdresseSub>}
-                          </AdresseItem>
-                        ))}
-                      </AdresseDropdown>
-                    )}
-                  </AdresseWrapper>
-                </FieldFull>
+                <>
+                  <FieldFull>
+                    <Label>Adresse</Label>
+                    <AdresseWrapper>
+                      <Input
+                        value={editForm.adresse ?? ""}
+                        onChange={e => handleAdresseChange(e.target.value)}
+                        onBlur={() => setTimeout(() => setAdresseSuggestions([]), 180)}
+                        placeholder="12 rue des Aventuriers"
+                        autoComplete="off"
+                      />
+                      {adresseSuggestions.length > 0 && (
+                        <AdresseDropdown>
+                          {adresseSuggestions.map((s, i) => (
+                            <AdresseItem key={i} onMouseDown={() => selectAdresse(s.value, s.city)}>
+                              {s.label}
+                              {s.context && <AdresseSub>{s.context}</AdresseSub>}
+                            </AdresseItem>
+                          ))}
+                        </AdresseDropdown>
+                      )}
+                    </AdresseWrapper>
+                  </FieldFull>
+
+                  <FieldFull>
+                    <Label>Ville</Label>
+                    <Select
+                      value={editForm.ville ?? ""}
+                      onChange={e => setEditForm(f => ({ ...f, ville: e.target.value }))}
+                    >
+                      <option value="">— Choisir une ville —</option>
+                      {VILLES_PAR_SECTEUR.map(group => (
+                        <optgroup key={group.secteur} label={group.secteur}>
+                          {group.villes.map(v => (
+                            <option key={v} value={v}>{v}</option>
+                          ))}
+                        </optgroup>
+                      ))}
+                    </Select>
+                    <HintText>
+                      Se remplit automatiquement quand vous choisissez une adresse ci-dessus — vous pouvez la corriger ici.
+                    </HintText>
+                  </FieldFull>
+                </>
               ) : (
                 <FieldFull>
                   <Label>Plateforme / lien</Label>

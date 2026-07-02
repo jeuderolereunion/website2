@@ -203,6 +203,12 @@ const Select = styled.select`
   }
 `;
 
+const HintText = styled.p`
+  font-size: 0.75rem;
+  color: rgba(255,255,255,0.35);
+  margin: 0.35rem 0 0;
+`;
+
 // ── Type toggle ───────────────────────────────────────────────────────────────
 
 const TypeRow = styled.div`
@@ -369,6 +375,37 @@ const SYSTEMES = [
   "Autre",
 ];
 
+// ─── Communes de La Réunion (regroupées par secteur) ─────────────────────────
+// ⚠️ Les libellés doivent rester cohérents avec la table VILLE_TO_SECTEUR
+// utilisée côté affichage (EventPageClient.tsx) pour la déduction du secteur.
+
+const VILLES_PAR_SECTEUR: { secteur: string; villes: string[] }[] = [
+  { secteur: "Nord",  villes: ["Saint-Denis", "Sainte-Marie", "Sainte-Suzanne"] },
+  { secteur: "Ouest", villes: ["Saint-Paul", "Le Port", "La Possession", "Trois-Bassins", "Saint-Leu", "Les Avirons", "L'Étang-Salé"] },
+  { secteur: "Sud",   villes: ["Saint-Pierre", "Saint-Louis", "Petite-Île", "Saint-Joseph", "Saint-Philippe", "Cilaos", "Entre-Deux", "Le Tampon"] },
+  { secteur: "Est",   villes: ["Saint-Benoît", "Saint-André", "Bras-Panon", "Salazie", "La Plaine-des-Palmistes", "Sainte-Rose"] },
+];
+
+// Normalise une chaîne pour comparer une ville retournée par l'API Adresse
+// (souvent en majuscules, ex: "SAINT-DENIS") avec notre liste de référence.
+function normalizeVille(str: string): string {
+  return str
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[-'’]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const ALL_VILLES = VILLES_PAR_SECTEUR.flatMap(g => g.villes);
+
+function matchVille(cityFromApi: string): string | null {
+  const key = normalizeVille(cityFromApi);
+  const found = ALL_VILLES.find(v => normalizeVille(v) === key);
+  return found ?? null;
+}
+
 // ─── Géolocalisation (autocomplétion d'adresse) ──────────────────────────────
 
 // Coordonnées approximatives du centre de La Réunion, utilisées pour biaiser
@@ -376,6 +413,11 @@ const SYSTEMES = [
 // locaux plutôt que les meilleurs matchs nationaux (souvent en Métropole).
 const REUNION_LAT = -21.115141;
 const REUNION_LON = 55.536384;
+
+type AddressSuggestion = {
+  label: string;
+  city: string;
+};
 
 // ─── Composant ────────────────────────────────────────────────────────────────
 
@@ -440,7 +482,7 @@ export default function ProposerEvenementPage() {
   const [uploadingImage, setUploadingImage] = useState(false);
 
   // ── Autocomplétion d'adresse (API Adresse data.gouv.fr) ──────────────────
-  const [addressSuggestions, setAddressSuggestions] = useState<string[]>([]);
+  const [addressSuggestions, setAddressSuggestions] = useState<AddressSuggestion[]>([]);
   const [addressLoading, setAddressLoading]         = useState(false);
   const [showSuggestions, setShowSuggestions]       = useState(false);
   const addressDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -461,6 +503,7 @@ export default function ProposerEvenementPage() {
     lieuType:       "presentiel" as "presentiel" | "ligne", // ← présentiel ou en ligne
     lieuDetail:     "",          // ← adresse OU plateforme (Discord, Roll20, Foundry...)
     lieuComplement: "",          // ← bâtiment, étage, digicode, point de repère...
+    ville:          "",          // ← commune de l'événement (présentiel), pour tri par secteur
     duree:          "2-3h",      // ← durée estimée de la session
     personnages:    "pretires" as "pretires" | "creation",  // ← prétirés ou création à la table
     ageTag:         "tous" as "tous" | "16" | "18",          // ← tag âge/contenu sensible
@@ -508,9 +551,12 @@ export default function ProposerEvenementPage() {
           ...features.filter(f => !isReunion(f)),
         ].slice(0, 5);
 
-        const labels: string[] = sorted.map((f: any) => f.properties.label as string);
-        setAddressSuggestions(labels);
-        setShowSuggestions(labels.length > 0);
+        const suggestions: AddressSuggestion[] = sorted.map((f: any) => ({
+          label: f.properties.label as string,
+          city:  f.properties.city as string,
+        }));
+        setAddressSuggestions(suggestions);
+        setShowSuggestions(suggestions.length > 0);
       } catch (err: any) {
         if (err.name !== "AbortError") {
           console.error("❌ Erreur autocomplétion adresse :", err);
@@ -521,8 +567,16 @@ export default function ProposerEvenementPage() {
     }, 300);
   }
 
-  function handleSelectAddress(label: string) {
-    setForm(f => ({ ...f, lieuDetail: label }));
+  function handleSelectAddress(suggestion: AddressSuggestion) {
+    // ⚠️ Pré-remplit automatiquement la ville à partir de l'adresse choisie
+    // (API Adresse renvoie la commune dans properties.city). L'utilisateur
+    // garde la main pour la corriger via le <Select> juste en dessous.
+    const matched = matchVille(suggestion.city);
+    setForm(f => ({
+      ...f,
+      lieuDetail: suggestion.label,
+      ville: matched ?? f.ville,
+    }));
     setAddressSuggestions([]);
     setShowSuggestions(false);
   }
@@ -600,6 +654,11 @@ export default function ProposerEvenementPage() {
       return;
     }
 
+    if (form.lieuType === "presentiel" && !form.ville) {
+      alert("Veuillez sélectionner la ville de l'événement.");
+      return;
+    }
+
     if (!form.systeme) {
       alert("Veuillez sélectionner un système de jeu.");
       return;
@@ -642,6 +701,7 @@ export default function ProposerEvenementPage() {
         lieuType:       form.lieuType,       // ← "presentiel" ou "ligne"
         lieuDetail:     form.lieuDetail,     // ← adresse ou plateforme
         lieuComplement: form.lieuComplement, // ← bâtiment, étage, digicode...
+        ville:          form.lieuType === "presentiel" ? form.ville : "", // ← commune (tri par secteur)
         duree:          form.duree,          // ← durée estimée
         personnages:    form.personnages,    // ← "pretires" ou "creation"
         ageTag:         form.ageTag,         // ← "tous" / "16" / "18"
@@ -655,7 +715,7 @@ export default function ProposerEvenementPage() {
         type: "one-shot", systeme: "", systemeAutre: "",
         date: "", heure: "", niveau: "Débutant",
         places: 6,
-        lieuType: "presentiel", lieuDetail: "", lieuComplement: "", duree: "2-3h",
+        lieuType: "presentiel", lieuDetail: "", lieuComplement: "", ville: "", duree: "2-3h",
         personnages: "pretires", ageTag: "tous",
       });
       setImageFile(null);
@@ -794,12 +854,12 @@ export default function ProposerEvenementPage() {
                 {addressLoading && <AddressLoading>⏳</AddressLoading>}
                 {showSuggestions && addressSuggestions.length > 0 && (
                   <AddressSuggestions>
-                    {addressSuggestions.map((label, i) => (
+                    {addressSuggestions.map((s, i) => (
                       <AddressSuggestionItem
                         key={i}
-                        onClick={() => handleSelectAddress(label)}
+                        onClick={() => handleSelectAddress(s)}
                       >
-                        📍 {label}
+                        📍 {s.label}
                       </AddressSuggestionItem>
                     ))}
                   </AddressSuggestions>
@@ -813,6 +873,26 @@ export default function ProposerEvenementPage() {
               />
             )}
           </Field>
+
+          {/* Ville : uniquement pertinent en présentiel — sert au tri par secteur (Nord/Sud/Est/Ouest) */}
+          {form.lieuType === "presentiel" && (
+            <Field>
+              <Label>Ville *</Label>
+              <Select value={form.ville} onChange={e => setForm({ ...form, ville: e.target.value })}>
+                <option value="">— Choisir une ville —</option>
+                {VILLES_PAR_SECTEUR.map(group => (
+                  <optgroup key={group.secteur} label={group.secteur}>
+                    {group.villes.map(v => (
+                      <option key={v} value={v}>{v}</option>
+                    ))}
+                  </optgroup>
+                ))}
+              </Select>
+              <HintText>
+                Se remplit automatiquement quand vous choisissez une adresse ci-dessus — vous pouvez la corriger ici.
+              </HintText>
+            </Field>
+          )}
 
           {/* Complément d'adresse : uniquement pertinent en présentiel */}
           {form.lieuType === "presentiel" && (
