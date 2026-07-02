@@ -32,7 +32,20 @@ type Proposition = {
   organisateur: string;
   email: string;
   image?: string;
-  
+  // ── Champs ajoutés depuis le formulaire "Proposer un événement" ───────────
+  // Optionnels ici pour rester compatibles avec d'anciennes propositions
+  // créées avant leur introduction.
+  type?: string;              // "one-shot" | "campagne"
+  systeme?: string;
+  mjId?: string;
+  mjNom?: string;
+  lieuType?: "presentiel" | "ligne";
+  lieuDetail?: string;
+  lieuComplement?: string;
+  ville?: string;
+  duree?: string;
+  personnages?: "pretires" | "creation";
+  ageTag?: "tous" | "16" | "18";
 };
 
 type TypeRessource = "regles" | "fiche" | "carte" | "bestiaire" | "scenario";
@@ -59,6 +72,17 @@ type PropositionRessource = {
   createdAt?: any;
 };
 
+type Utilisateur = {
+  id: string;
+  prenom?: string;
+  nom?: string;
+  pseudo?: string;
+  email: string;
+  role: string;
+  status?: string;
+  createdAt?: any;
+};
+
 type PendingUser = {
   id: string;
   prenom?: string;
@@ -68,6 +92,7 @@ type PendingUser = {
   role: string;
   createdAt?: any;
 };
+
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
@@ -261,6 +286,11 @@ const ValidateBtn = styled.button`
 
   &:hover  { background: rgba(0,255,120,0.22); }
   &:active { background: rgba(0,255,120,0.32); }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
 `;
 
 const RejectBtn = styled.button`
@@ -278,6 +308,11 @@ const RejectBtn = styled.button`
 
   &:hover  { background: rgba(255,80,80,0.22); }
   &:active { background: rgba(255,80,80,0.32); }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
 `;
 
 // ── Ressources ────────────────────────────────────────────────────────────────
@@ -495,6 +530,11 @@ const DeleteBtn = styled.button`
   transition: all 0.15s;
 
   &:hover { background: rgba(255,80,80,0.18); }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
 `;
 
 const Empty = styled.p`
@@ -547,8 +587,11 @@ const PropositionHeader = styled.div`
 export default function AdminPage() {
   const [authorized, setAuthorized]     = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
-  const [onglet, setOnglet]             = useState<"evenements" | "ressources" | "comptes">("comptes");
-
+  const [onglet, setOnglet] = useState<"evenements" | "ressources" | "comptes" | "membres">("comptes");
+  const [membres, setMembres]             = useState<Utilisateur[]>([]);
+  const [loadingMembres, setLoadingMembres] = useState(true);
+const [rechercheMembre, setRechercheMembre] = useState("");
+const [filtreRole, setFiltreRole]        = useState<"tous" | "joueur" | "mj">("tous");
   // ── État événements ────────────────────────────────────────────────────────
   const [propositions, setPropositions]   = useState<Proposition[]>([]);
   const [loadingEvts, setLoadingEvts]     = useState(true);
@@ -567,6 +610,32 @@ export default function AdminPage() {
   // ── État comptes en attente ───────────────────────────────────────────────
   const [pendingUsers, setPendingUsers]   = useState<PendingUser[]>([]);
   const [loadingUsers, setLoadingUsers]   = useState(true);
+
+  // ── Garde anti-double-clic ─────────────────────────────────────────────────
+  // Regroupe les IDs (événements, ressources, comptes, propositions...) en cours
+  // de traitement, pour désactiver les boutons et bloquer les appels concurrents.
+  const [processingIds, setProcessingIds] = useState<Set<string>>(new Set());
+const nbJoueurs = membres.filter(u => u.role !== "mj").length;
+const nbMJ      = membres.filter(u => u.role === "mj").length;
+
+const membresFiltres = membres.filter(u => {
+  const matchRole = filtreRole === "tous"
+    ? true
+    : filtreRole === "mj" ? u.role === "mj" : u.role !== "mj";
+  const texte = `${u.prenom || ""} ${u.nom || ""} ${u.pseudo || ""} ${u.email}`.toLowerCase();
+  return matchRole && texte.includes(rechercheMembre.toLowerCase());
+});
+  function startProcessing(id: string) {
+    setProcessingIds(prev => new Set(prev).add(id));
+  }
+
+  function stopProcessing(id: string) {
+    setProcessingIds(prev => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }
 
   // ── Auth ──────────────────────────────────────────────────────────────────
 
@@ -589,6 +658,7 @@ export default function AdminPage() {
       chargerRessources();
       chargerPropositionsRessources();
       chargerComptesEnAttente();
+      chargerMembres();
     });
     return () => unsub();
   }, []);
@@ -601,6 +671,15 @@ export default function AdminPage() {
     setPropositions(snap.docs.map(d => ({ id: d.id, ...d.data() })) as Proposition[]);
     setLoadingEvts(false);
   }
+
+  async function chargerMembres() {
+  setLoadingMembres(true);
+  const snap = await getDocs(collection(db, "users"));
+  const tous = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Utilisateur[];
+  // On exclut les comptes encore en attente, déjà gérés dans l'onglet Comptes
+  setMembres(tous.filter(u => u.status !== "pending"));
+  setLoadingMembres(false);
+}
 
   async function chargerRessources() {
     setLoadingRes(true);
@@ -628,29 +707,39 @@ export default function AdminPage() {
   // ── Actions comptes ───────────────────────────────────────────────────────
 
   async function validerCompte(userId: string) {
+    if (processingIds.has(userId)) return;
+    startProcessing(userId);
     try {
       await updateDoc(doc(db, "users", userId), { status: "active" });
       setPendingUsers(prev => prev.filter(u => u.id !== userId));
     } catch (err) {
       console.error(err);
       alert("Erreur lors de la validation du compte.");
+    } finally {
+      stopProcessing(userId);
     }
   }
 
   async function refuserCompte(userId: string) {
+    if (processingIds.has(userId)) return;
     if (!confirm("Refuser et supprimer ce compte ? Cette action est irréversible côté Firestore (le compte d'authentification devra être supprimé séparément).")) return;
+    startProcessing(userId);
     try {
       await deleteDoc(doc(db, "users", userId));
       setPendingUsers(prev => prev.filter(u => u.id !== userId));
     } catch (err) {
       console.error(err);
       alert("Erreur lors du refus du compte.");
+    } finally {
+      stopProcessing(userId);
     }
   }
 
   // ── Actions événements ────────────────────────────────────────────────────
 
   async function accepterEvenement(event: Proposition) {
+    if (processingIds.has(event.id)) return; // évite le double-clic / double-soumission
+    startProcessing(event.id);
     try {
       await addDoc(collection(db, "evenements"), {
         titre: event.titre,
@@ -662,21 +751,50 @@ export default function AdminPage() {
         places: event.places,
         inscrits: 0,
         image: event.image || "",
-        mjId: (event as any).mjId || null,
+        mjId: event.mjId || null,
+        // ── Champs ajoutés par le formulaire "Proposer un événement" ──────
+        // ⚠️ FIX : ces champs étaient collectés dans le formulaire mais
+        // jamais recopiés vers "evenements" lors de la validation — ils
+        // disparaissaient silencieusement. On les reporte désormais tels
+        // quels, avec des valeurs de repli pour les anciennes propositions
+        // qui ne les avaient pas encore.
+        type:           event.type || "one-shot",
+        systeme:        event.systeme || "",
+        mjNom:          event.mjNom || event.organisateur || "",
+        lieuType:       event.lieuType || "presentiel",
+        lieuDetail:     event.lieuDetail || "",
+        lieuComplement: event.lieuComplement || "",
+        ville:          event.ville || "",
+        duree:          event.duree || "",
+        personnages:    event.personnages || "pretires",
+        ageTag:         event.ageTag || "tous",
       });
       await deleteDoc(doc(db, "propositions_evenements", event.id));
-      chargerPropositions();
-      
+      // Mise à jour optimiste : on retire l'item localement sans refaire
+      // un aller-retour réseau complet (évite la fenêtre où la carte
+      // reste affichée et cliquable pendant le rechargement).
+      setPropositions(prev => prev.filter(p => p.id !== event.id));
     } catch (err) {
       console.error(err);
-      
+      alert("Erreur lors de la validation de l'événement.");
+    } finally {
+      stopProcessing(event.id);
     }
   }
 
   async function supprimerProposition(id: string) {
+    if (processingIds.has(id)) return;
     if (!confirm("Refuser cette proposition ?")) return;
-    await deleteDoc(doc(db, "propositions_evenements", id));
-    chargerPropositions();
+    startProcessing(id);
+    try {
+      await deleteDoc(doc(db, "propositions_evenements", id));
+      setPropositions(prev => prev.filter(p => p.id !== id));
+    } catch (err) {
+      console.error(err);
+      alert("Erreur lors du refus de la proposition.");
+    } finally {
+      stopProcessing(id);
+    }
   }
 
   // ── Actions ressources (ajout direct par l'admin) ─────────────────────────
@@ -705,33 +823,26 @@ export default function AdminPage() {
     }
   }
 
-  async function supprimerRessource(
-  id: string,
-  titre: string
-) {
-  if (!confirm(`Supprimer "${titre}" ?`)) {
-    return;
+  async function supprimerRessource(id: string, titre: string) {
+    if (processingIds.has(id)) return;
+    if (!confirm(`Supprimer "${titre}" ?`)) return;
+    startProcessing(id);
+    try {
+      await deleteDoc(doc(db, "ressources", id));
+      setRessources(prev => prev.filter(r => r.id !== id));
+    } catch (error) {
+      console.error(error);
+      alert("Erreur lors de la suppression de la ressource.");
+    } finally {
+      stopProcessing(id);
+    }
   }
-
-  try {
-    await deleteDoc(
-      doc(db, "ressources", id)
-    );
-
-    setRessources((prev) =>
-      prev.filter((r) => r.id !== id)
-    );
-
-    
-  } catch (error) {
-    console.error(error);
-    
-  }
-}
 
   // ── Actions propositions de ressources (soumises par les utilisateurs) ────
 
   async function accepterRessource(proposition: PropositionRessource) {
+    if (processingIds.has(proposition.id)) return;
+    startProcessing(proposition.id);
     try {
       await addDoc(collection(db, "ressources"), {
         titre: proposition.titre,
@@ -747,17 +858,23 @@ export default function AdminPage() {
     } catch (err) {
       console.error(err);
       alert("Erreur lors de la validation de la ressource.");
+    } finally {
+      stopProcessing(proposition.id);
     }
   }
 
   async function refuserPropositionRessource(id: string) {
+    if (processingIds.has(id)) return;
     if (!confirm("Refuser cette proposition de ressource ?")) return;
+    startProcessing(id);
     try {
       await deleteDoc(doc(db, "propositions_ressources", id));
       setPropositionsRessources(prev => prev.filter(p => p.id !== id));
     } catch (err) {
       console.error(err);
       alert("Erreur lors du refus de la ressource.");
+    } finally {
+      stopProcessing(id);
     }
   }
 
@@ -783,6 +900,13 @@ export default function AdminPage() {
           {pendingUsers.length > 0 && <Badge>{pendingUsers.length}</Badge>}
         </Tab>
         <Tab
+  $active={onglet === "membres"}
+  onClick={() => setOnglet("membres")}
+>
+  🧑‍🤝‍🧑 Membres
+  <Badge>{membres.length}</Badge>
+</Tab>
+        <Tab
           $active={onglet === "evenements"}
           onClick={() => setOnglet("evenements")}
         >
@@ -807,36 +931,85 @@ export default function AdminPage() {
             <Empty>Aucun compte en attente de validation.</Empty>
           )}
 
-          {pendingUsers.map(u => (
-            <Card key={u.id}>
-              <CardHeader>
-                <CardTitle>
-                  {u.prenom && u.nom ? `${u.prenom} ${u.nom}` : (u.pseudo || "Utilisateur")}
-                </CardTitle>
-              </CardHeader>
+          {pendingUsers.map(u => {
+            const busy = processingIds.has(u.id);
+            return (
+              <Card key={u.id}>
+                <CardHeader>
+                  <CardTitle>
+                    {u.prenom && u.nom ? `${u.prenom} ${u.nom}` : (u.pseudo || "Utilisateur")}
+                  </CardTitle>
+                </CardHeader>
 
-              <CardBody>
-                <Description>{u.email}</Description>
+                <CardBody>
+                  <Description>{u.email}</Description>
 
-                <MetaRow>
-                  <RolePill $mj={u.role === "mj"}>
-                    {u.role === "mj" ? "🧙 MJ & Joueur" : "🎲 Joueur"}
-                  </RolePill>
-                </MetaRow>
+                  <MetaRow>
+                    <RolePill $mj={u.role === "mj"}>
+                      {u.role === "mj" ? "🧙 MJ & Joueur" : "🎲 Joueur"}
+                    </RolePill>
+                  </MetaRow>
 
-                <Actions>
-                  <ValidateBtn onClick={() => validerCompte(u.id)}>
-                    ✅ Valider
-                  </ValidateBtn>
-                  <RejectBtn onClick={() => refuserCompte(u.id)}>
-                    ❌ Refuser
-                  </RejectBtn>
-                </Actions>
-              </CardBody>
-            </Card>
-          ))}
+                  <Actions>
+                    <ValidateBtn disabled={busy} onClick={() => validerCompte(u.id)}>
+                      {busy ? "⏳ Validation…" : "✅ Valider"}
+                    </ValidateBtn>
+                    <RejectBtn disabled={busy} onClick={() => refuserCompte(u.id)}>
+                      {busy ? "⏳ …" : "❌ Refuser"}
+                    </RejectBtn>
+                  </Actions>
+                </CardBody>
+              </Card>
+            );
+          })}
         </Grid>
       )}
+
+      {onglet === "membres" && (
+  <Grid>
+    <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.5rem" }}>
+      <Input
+        placeholder="Rechercher un nom, pseudo ou email…"
+        value={rechercheMembre}
+        onChange={e => setRechercheMembre(e.target.value)}
+        style={{ flex: 1, minWidth: "200px" }}
+      />
+      <Select
+        value={filtreRole}
+        onChange={e => setFiltreRole(e.target.value as any)}
+        style={{ maxWidth: "160px" }}
+      >
+        <option value="tous">Tous ({membres.length})</option>
+        <option value="joueur">Joueurs ({nbJoueurs})</option>
+        <option value="mj">MJ ({nbMJ})</option>
+      </Select>
+    </div>
+
+    {loadingMembres && <Loading>Chargement…</Loading>}
+
+    {!loadingMembres && membresFiltres.length === 0 && (
+      <Empty>Aucun membre ne correspond à cette recherche.</Empty>
+    )}
+
+    {membresFiltres.map(u => (
+      <Card key={u.id}>
+        <CardHeader>
+          <CardTitle>
+            {u.prenom && u.nom ? `${u.prenom} ${u.nom}` : (u.pseudo || "Utilisateur")}
+          </CardTitle>
+        </CardHeader>
+        <CardBody>
+          <Description>{u.email}</Description>
+          <MetaRow>
+            <RolePill $mj={u.role === "mj"}>
+              {u.role === "mj" ? "🧙 MJ & Joueur" : "🎲 Joueur"}
+            </RolePill>
+          </MetaRow>
+        </CardBody>
+      </Card>
+    ))}
+  </Grid>
+)}
 
       {/* ── Onglet Événements ── */}
       {onglet === "evenements" && (
@@ -847,48 +1020,62 @@ export default function AdminPage() {
             <Empty>Aucune proposition en attente.</Empty>
           )}
 
-          {propositions.map(event => (
-            <Card key={event.id}>
-              <CardHeader>
-                <CardTitle>{event.titre}</CardTitle>
-              </CardHeader>
+          {propositions.map(event => {
+            const busy = processingIds.has(event.id);
+            return (
+              <Card key={event.id}>
+                <CardHeader>
+                  <CardTitle>{event.titre}</CardTitle>
+                </CardHeader>
 
-              {event.image && (
-                <img
-                  src={event.image}
-                  alt={event.titre}
-                  style={{
-                    width: "100%",
-                    height: "160px",
-                    objectFit: "cover",
-                    display: "block",
-                  }}
-                />
-              )}
+                {event.image && (
+                  <img
+                    src={event.image}
+                    alt={event.titre}
+                    style={{
+                      width: "100%",
+                      height: "160px",
+                      objectFit: "cover",
+                      display: "block",
+                    }}
+                  />
+                )}
 
-              <CardBody>
-                <Description>{event.description}</Description>
+                <CardBody>
+                  <Description>{event.description}</Description>
 
-                <MetaRow>
-                  <MetaBadge>📅 {event.date}</MetaBadge>
-                  <MetaBadge>🕒 {event.heure}</MetaBadge>
-                  <MetaBadge>🎲 {event.categorie}</MetaBadge>
-                  <MetaBadge>⭐ {event.niveau}</MetaBadge>
-                  <MetaBadge>👥 {event.places} places</MetaBadge>
-                  <MetaBadge>👤 {event.organisateur}</MetaBadge>
-                </MetaRow>
+                  <MetaRow>
+                    <MetaBadge>📅 {event.date}</MetaBadge>
+                    <MetaBadge>🕒 {event.heure}</MetaBadge>
+                    <MetaBadge>🎲 {event.categorie}</MetaBadge>
+                    <MetaBadge>⭐ {event.niveau}</MetaBadge>
+                    <MetaBadge>👥 {event.places} places</MetaBadge>
+                    <MetaBadge>👤 {event.organisateur}</MetaBadge>
+                    {event.systeme && <MetaBadge>🎯 {event.systeme}</MetaBadge>}
+                    {event.type && <MetaBadge>{event.type === "campagne" ? "📖 Campagne" : "⚡ One-Shot"}</MetaBadge>}
+                    <MetaBadge>
+                      {event.lieuType === "ligne" ? "💻 En ligne" : "📍 Présentiel"}
+                      {event.ville ? ` · ${event.ville}` : ""}
+                    </MetaBadge>
+                    {event.lieuDetail && <MetaBadge>🗺️ {event.lieuDetail}</MetaBadge>}
+                    {event.duree && <MetaBadge>⏱️ {event.duree}</MetaBadge>}
+                    {event.ageTag && event.ageTag !== "tous" && (
+                      <MetaBadge>🔞 {event.ageTag}+</MetaBadge>
+                    )}
+                  </MetaRow>
 
-                <Actions>
-                  <ValidateBtn onClick={() => accepterEvenement(event)}>
-                    ✅ Valider
-                  </ValidateBtn>
-                  <RejectBtn onClick={() => supprimerProposition(event.id)}>
-                    ❌ Refuser
-                  </RejectBtn>
-                </Actions>
-              </CardBody>
-            </Card>
-          ))}
+                  <Actions>
+                    <ValidateBtn disabled={busy} onClick={() => accepterEvenement(event)}>
+                      {busy ? "⏳ Validation…" : "✅ Valider"}
+                    </ValidateBtn>
+                    <RejectBtn disabled={busy} onClick={() => supprimerProposition(event.id)}>
+                      {busy ? "⏳ …" : "❌ Refuser"}
+                    </RejectBtn>
+                  </Actions>
+                </CardBody>
+              </Card>
+            );
+          })}
         </Grid>
       )}
 
@@ -984,37 +1171,40 @@ export default function AdminPage() {
                 <Empty>Aucune proposition de ressource en attente.</Empty>
               )}
 
-              {propositionsRessources.map(p => (
-                <PropositionCard key={p.id}>
-                  <PropositionHeader>
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <ItemTitre>{p.titre}</ItemTitre>
-                      <ItemMeta>
-                        {p.univers} · {p.taille || "taille non renseignée"}
-                        {p.email ? ` · proposé par ${p.auteur || p.email}` : ""}
-                      </ItemMeta>
-                    </div>
-                    <TypePill>
-                      {TYPES_RESSOURCE.find(t => t.value === p.type)?.label ?? p.type}
-                    </TypePill>
-                  </PropositionHeader>
+              {propositionsRessources.map(p => {
+                const busy = processingIds.has(p.id);
+                return (
+                  <PropositionCard key={p.id}>
+                    <PropositionHeader>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <ItemTitre>{p.titre}</ItemTitre>
+                        <ItemMeta>
+                          {p.univers} · {p.taille || "taille non renseignée"}
+                          {p.email ? ` · proposé par ${p.auteur || p.email}` : ""}
+                        </ItemMeta>
+                      </div>
+                      <TypePill>
+                        {TYPES_RESSOURCE.find(t => t.value === p.type)?.label ?? p.type}
+                      </TypePill>
+                    </PropositionHeader>
 
-                  <MetaRow>
-                    <LinkBtn href={p.url} target="_blank" rel="noopener noreferrer">
-                      🔗 Voir le lien
-                    </LinkBtn>
-                  </MetaRow>
+                    <MetaRow>
+                      <LinkBtn href={p.url} target="_blank" rel="noopener noreferrer">
+                        🔗 Voir le lien
+                      </LinkBtn>
+                    </MetaRow>
 
-                  <Actions>
-                    <ValidateBtn onClick={() => accepterRessource(p)}>
-                      ✅ Valider
-                    </ValidateBtn>
-                    <RejectBtn onClick={() => refuserPropositionRessource(p.id)}>
-                      ❌ Refuser
-                    </RejectBtn>
-                  </Actions>
-                </PropositionCard>
-              ))}
+                    <Actions>
+                      <ValidateBtn disabled={busy} onClick={() => accepterRessource(p)}>
+                        {busy ? "⏳ Validation…" : "✅ Valider"}
+                      </ValidateBtn>
+                      <RejectBtn disabled={busy} onClick={() => refuserPropositionRessource(p.id)}>
+                        {busy ? "⏳ …" : "❌ Refuser"}
+                      </RejectBtn>
+                    </Actions>
+                  </PropositionCard>
+                );
+              })}
             </SubSection>
 
             {/* Ressources déjà publiées */}
@@ -1029,24 +1219,27 @@ export default function AdminPage() {
               <Empty>Aucune ressource pour l'instant.</Empty>
             )}
 
-            {ressources.map(r => (
-              <RessourceItem key={r.id}>
-                <ItemInfo>
-                  <ItemTitre>{r.titre}</ItemTitre>
-                  <ItemMeta>{r.univers} · {r.taille || "taille non renseignée"}</ItemMeta>
-                </ItemInfo>
+            {ressources.map(r => {
+              const busy = processingIds.has(r.id);
+              return (
+                <RessourceItem key={r.id}>
+                  <ItemInfo>
+                    <ItemTitre>{r.titre}</ItemTitre>
+                    <ItemMeta>{r.univers} · {r.taille || "taille non renseignée"}</ItemMeta>
+                  </ItemInfo>
 
-                <TypePill>
-                  {TYPES_RESSOURCE.find(t => t.value === r.type)?.label ?? r.type}
-                </TypePill>
+                  <TypePill>
+                    {TYPES_RESSOURCE.find(t => t.value === r.type)?.label ?? r.type}
+                  </TypePill>
 
-                <LinkBtn href={r.url} target="_blank" rel="noopener noreferrer">↗</LinkBtn>
+                  <LinkBtn href={r.url} target="_blank" rel="noopener noreferrer">↗</LinkBtn>
 
-                <DeleteBtn onClick={() => supprimerRessource(r.id, r.titre)}>
-                  Supprimer
-                </DeleteBtn>
-              </RessourceItem>
-            ))}
+                  <DeleteBtn disabled={busy} onClick={() => supprimerRessource(r.id, r.titre)}>
+                    {busy ? "…" : "Supprimer"}
+                  </DeleteBtn>
+                </RessourceItem>
+              );
+            })}
           </div>
 
         </RessourcesLayout>
