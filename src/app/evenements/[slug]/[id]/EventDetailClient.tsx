@@ -1140,14 +1140,48 @@ const adresseAbortRef = useRef<AbortController | null>(null);
 
   // ── Partage ───────────────────────────────────────────────────────────────
 
-  async function handleShare() {
-    try {
-      if (navigator.share) await navigator.share({ title: event!.titre, url: window.location.href });
-      else await navigator.clipboard.writeText(window.location.href);
-      setShareFeedback("copied");
-    } catch { setShareFeedback("error"); }
-    setTimeout(() => setShareFeedback("idle"), 2000);
+async function handleShare() {
+  const shareUrl = window.location.href;
+  const shareTitle = event!.titre;
+  const shareText = `${event!.titre} — ${formatDateFr(event!.date)} à ${event!.heure}`;
+
+  try {
+    // On tente d'abord un partage avec l'image (si dispo et si le navigateur le supporte)
+    if (event?.image && navigator.share && navigator.canShare) {
+      try {
+        const response = await fetch(event.image, { mode: "cors" });
+        const blob = await response.blob();
+        const fileName = event.image.split("/").pop()?.split("?")[0] || "evenement.jpg";
+        const file = new File([blob], fileName, { type: blob.type || "image/jpeg" });
+
+        if (navigator.canShare({ files: [file] })) {
+          await navigator.share({
+            title: shareTitle,
+            text: shareText,
+            url: shareUrl,
+            files: [file],
+          });
+          setShareFeedback("copied");
+          setTimeout(() => setShareFeedback("idle"), 2000);
+          return;
+        }
+      } catch {
+        // Échec du fetch/partage image (CORS, format non supporté…) → on retombe sur le partage classique
+      }
+    }
+
+    // Partage sans image (lien + texte)
+    if (navigator.share) {
+      await navigator.share({ title: shareTitle, text: shareText, url: shareUrl });
+    } else {
+      await navigator.clipboard.writeText(shareUrl);
+    }
+    setShareFeedback("copied");
+  } catch {
+    setShareFeedback("error");
   }
+  setTimeout(() => setShareFeedback("idle"), 2000);
+}
 
   // ── Upload photo (galerie) ──────────────────────────────────────────────────
 

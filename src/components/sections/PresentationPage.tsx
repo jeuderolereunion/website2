@@ -1527,8 +1527,8 @@ export default function PresentationPage() {
               <ContactLink href="mailto:jeuderolereunion@gmail.com">
                 ✉️ jeuderolereunion@gmail.com
               </ContactLink>
-              <ContactLink href="https://discord.gg/V8WCYFDZPS" target="_blank" rel="noopener noreferrer">
-                💬 discord.gg/V8WCYFDZPS
+              <ContactLink href="https://discord.gg/ZtHDCt7RdY" target="_blank" rel="noopener noreferrer">
+                💬 discord.gg/ZtHDCt7RdY
               </ContactLink>
               <ContactLink href="https://www.instagram.com/jeuderolereunion" target="_blank" rel="noopener noreferrer">
                 📸 @jeuderolereunion
