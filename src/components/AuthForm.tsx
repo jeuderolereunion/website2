@@ -425,6 +425,7 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
     if (code === "auth/too-many-requests") return "Trop de tentatives. Réessayez plus tard.";
     if (code === "auth/popup-closed-by-user") return "Connexion Google annulée.";
     if (code === "auth/popup-blocked") return "La fenêtre Google a été bloquée par le navigateur. Autorisez les popups et réessayez.";
+    if (code === "auth/unauthorized-domain") return "Ce domaine n'est pas autorisé pour la connexion Google. Contactez le support.";
     if (code === "permission-denied" || err?.message?.includes("permissions")) {
       return "Impossible de finaliser cette action pour le moment. Contactez le support si le problème persiste.";
     }

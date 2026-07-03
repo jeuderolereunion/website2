@@ -6,6 +6,10 @@ import Link from "next/link";
 import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged, signOut, User } from "firebase/auth";
 import Navigation from "@/components/Navigation";
+import ProfileNiveauSelector from "@/components/Profileniveauselector";
+import ContactOfficers from "@/components/ContactOfficers";
+import OfficerInbox from "@/components/OfficerInbox";
+import { subscribeToConversations, Conversation } from "@/lib/chat";
 import {
   collection,
   query,
@@ -26,7 +30,7 @@ const fadeUp = keyframes`
   to   { opacity: 1; transform: translateY(0); }
 `;
 
-// ─── Styled components ────────────────────────────────────────────────────────
+// ─── Layout ───────────────────────────────────────────────────────────────────
 
 const Page = styled.main`
   min-height: 100vh;
@@ -36,28 +40,37 @@ const Page = styled.main`
 `;
 
 const Container = styled.div`
-  max-width: 900px;
+  max-width: 920px;
   margin: 0 auto;
 `;
+
+// ─── Header ────────────────────────────────────────────────────────────────────
 
 const ProfileHeader = styled.div`
   display: flex;
   align-items: center;
   gap: 1.1rem;
-  margin-bottom: 2.5rem;
+  margin-bottom: 1.75rem;
   flex-wrap: wrap;
+
+  @media (max-width: 520px) {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.85rem;
+  }
 `;
 
 const Avatar = styled.div`
-  width: 64px;
-  height: 64px;
+  width: 60px;
+  height: 60px;
   border-radius: 50%;
-  background: linear-gradient(135deg, rgba(120,80,255,0.5), rgba(80,40,200,0.5));
+  background: linear-gradient(135deg, rgba(120,80,255,0.55), rgba(80,40,200,0.55));
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.8rem;
+  font-size: 1.6rem;
   flex-shrink: 0;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.08);
 `;
 
 const ProfileInfo = styled.div`
@@ -66,25 +79,41 @@ const ProfileInfo = styled.div`
 `;
 
 const Name = styled.h1`
-  font-size: clamp(1.3rem, 4vw, 1.8rem);
+  font-size: clamp(1.25rem, 4vw, 1.65rem);
   font-weight: 800;
-  margin-bottom: 0.2rem;
+  margin-bottom: 0.15rem;
+  line-height: 1.2;
 `;
 
 const Email = styled.p`
-  font-size: 0.85rem;
-  color: rgba(255,255,255,0.45);
+  font-size: 0.82rem;
+  color: rgba(255,255,255,0.4);
+  margin-bottom: 0.5rem;
 `;
 
-const RolePill = styled.span<{ $mj?: boolean }>`
-  display: inline-block;
-  margin-top: 0.4rem;
-  font-size: 0.74rem;
+const BadgeRow = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+`;
+
+const Pill = styled.span<{ $tone?: "mj" | "officer" | "niveau" | "default" }>`
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.72rem;
   font-weight: 700;
   padding: 3px 10px;
   border-radius: 999px;
-  background: ${p => p.$mj ? "rgba(255,180,80,0.15)" : "rgba(120,80,255,0.18)"};
-  color: ${p => p.$mj ? "rgba(255,200,120,1)" : "rgba(180,150,255,1)"};
+  background: ${p =>
+    p.$tone === "mj" ? "rgba(255,180,80,0.15)"
+    : p.$tone === "officer" ? "rgba(120,220,180,0.15)"
+    : p.$tone === "niveau" ? "rgba(120,80,255,0.15)"
+    : "rgba(255,255,255,0.08)"};
+  color: ${p =>
+    p.$tone === "mj" ? "rgba(255,200,120,1)"
+    : p.$tone === "officer" ? "rgba(140,230,200,1)"
+    : p.$tone === "niveau" ? "rgba(180,150,255,1)"
+    : "rgba(255,255,255,0.6)"};
 `;
 
 const LogoutBtn = styled.button`
@@ -99,19 +128,106 @@ const LogoutBtn = styled.button`
   cursor: pointer;
   transition: background 0.15s;
   white-space: nowrap;
+  flex-shrink: 0;
 
   &:hover { background: rgba(255,255,255,0.08); color: white; }
+
+  @media (max-width: 520px) {
+    margin-left: 0;
+  }
+`;
+
+// ─── Cartes de résumé (accès rapide) ────────────────────────────────────────────
+
+const StatGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1.75rem;
+`;
+
+const StatCard = styled.button<{ $accent?: boolean }>`
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  text-align: left;
+  padding: 0.95rem 1.1rem;
+  border-radius: 14px;
+  border: 1px solid ${p => p.$accent ? "rgba(160,120,255,0.35)" : "rgba(255,255,255,0.08)"};
+  background: ${p => p.$accent
+    ? "linear-gradient(135deg, rgba(120,80,255,0.16), rgba(120,80,255,0.04))"
+    : "rgba(255,255,255,0.03)"};
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.15s, background 0.15s;
+  animation: ${fadeUp} 0.3s ease both;
+
+  &:hover {
+    border-color: rgba(160,120,255,0.5);
+    transform: translateY(-1px);
+  }
+`;
+
+const StatValue = styled.span`
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: white;
+  line-height: 1;
+`;
+
+const StatLabel = styled.span`
+  font-size: 0.76rem;
+  color: rgba(255,255,255,0.45);
+  font-weight: 600;
+`;
+
+// ─── Onglets ────────────────────────────────────────────────────────────────────
+
+const TabBar = styled.div`
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 1.75rem;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  overflow-x: auto;
+  scrollbar-width: none;
+  &::-webkit-scrollbar { display: none; }
+`;
+
+const TabBtn = styled.button<{ $active: boolean }>`
+  flex-shrink: 0;
+  padding: 0.7rem 0.95rem;
+  background: none;
+  border: none;
+  border-bottom: 2px solid ${p => p.$active ? "rgba(160,120,255,0.9)" : "transparent"};
+  color: ${p => p.$active ? "white" : "rgba(255,255,255,0.45)"};
+  font-size: 0.87rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  white-space: nowrap;
+  transition: color 0.15s;
+
+  &:hover { color: white; }
+`;
+
+const TabBadge = styled.span`
+  font-size: 0.68rem;
+  font-weight: 800;
+  background: rgba(120,80,255,0.9);
+  color: white;
+  padding: 1px 7px;
+  border-radius: 999px;
 `;
 
 const SectionTitle = styled.h2`
-  font-size: 1.1rem;
+  font-size: 1.05rem;
   font-weight: 700;
-  margin: 2.5rem 0 1rem;
+  margin-bottom: 1rem;
   display: flex;
   align-items: center;
   gap: 0.5rem;
-
-  &:first-of-type { margin-top: 0; }
 `;
 
 const Count = styled.span`
@@ -135,6 +251,9 @@ const Card = styled.div`
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  transition: border-color 0.15s;
+
+  &:hover { border-color: rgba(255,255,255,0.15); }
 
   @media (min-width: 560px) {
     flex-direction: row;
@@ -170,6 +289,7 @@ const CancelBtn = styled.button`
   cursor: pointer;
   white-space: nowrap;
   transition: background 0.15s;
+  flex-shrink: 0;
 
   &:hover:not(:disabled) { background: rgba(255,80,80,0.18); }
   &:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -303,12 +423,17 @@ const BrowseLink = styled(Link)`
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+type NiveauChoice = "debutant" | "confirme" | "expert";
+type Poste = "president" | "tresorier" | "secretaire";
+
 type UserProfile = {
   prenom?: string;
   nom?: string;
   pseudo?: string;
   email: string;
   role: string;
+  niveau?: NiveauChoice;
+  poste?: Poste;
 };
 
 type Inscription = {
@@ -335,6 +460,20 @@ type EventDoc = {
   inscrits: number;
 };
 
+const NIVEAU_LABEL: Record<NiveauChoice, string> = {
+  debutant: "🌱 Débutant",
+  confirme: "🎯 Confirmé",
+  expert: "🏆 Expert",
+};
+
+const POSTE_LABEL: Record<Poste, string> = {
+  president: "🏛️ Président",
+  tresorier: "🏛️ Trésorier",
+  secretaire: "🏛️ Secrétaire",
+};
+
+type TabKey = "apercu" | "inscriptions" | "evenements" | "messages" | "profil";
+
 // ─── Composant ────────────────────────────────────────────────────────────────
 
 export default function MonComptePage() {
@@ -355,7 +494,13 @@ export default function MonComptePage() {
   const [loadingParticipants, setLoadingParticipants] = useState<string | null>(null);
   const [removingId, setRemovingId]   = useState<string | null>(null);
 
+  // Onglets + compteur de messages non lus
+  const [activeTab, setActiveTab] = useState<TabKey>("apercu");
+  const [unreadCount, setUnreadCount] = useState(0);
+
   const isMJ = profile?.role === "mj" || profile?.role === "admin";
+  const isOfficer = !!profile?.poste;
+  const isDebutant = profile?.niveau === "debutant";
 
   // ── Auth + profil ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -374,6 +519,8 @@ export default function MonComptePage() {
           pseudo: data.pseudo,
           email: u.email || "",
           role: data.role || "joueur",
+          niveau: data.niveau,
+          poste: data.poste,
         });
       }
       setAuthChecked(true);
@@ -405,6 +552,18 @@ export default function MonComptePage() {
     });
     return () => unsub();
   }, [user, isMJ]);
+
+  // ── Compteur de messages non lus (membres du bureau uniquement) ─────────────
+  useEffect(() => {
+    if (!user || !isOfficer) {
+      setUnreadCount(0);
+      return;
+    }
+    const unsub = subscribeToConversations(user.uid, (convs: Conversation[]) => {
+      setUnreadCount(convs.filter(c => c.unreadBy?.includes(user.uid)).length);
+    });
+    return () => unsub();
+  }, [user, isOfficer]);
 
   async function handleLogout() {
     await signOut(auth);
@@ -482,60 +641,160 @@ export default function MonComptePage() {
     );
   }
 
+  const displayName = profile?.prenom && profile?.nom
+    ? `${profile.prenom} ${profile.nom}`
+    : profile?.pseudo || "Aventurier";
+
   return (
     <Page>
       <Navigation />
       <Container>
 
+        {/* ── En-tête compact ── */}
         <ProfileHeader>
           <Avatar>🧙</Avatar>
           <ProfileInfo>
-            <Name>
-              {profile?.prenom && profile?.nom
-                ? `${profile.prenom} ${profile.nom}`
-                : profile?.pseudo || "Aventurier"}
-            </Name>
+            <Name>{displayName}</Name>
             <Email>{profile?.email}</Email>
-            <RolePill $mj={isMJ}>
-              {isMJ ? "🧙 MJ & Joueur" : "🎲 Joueur"}
-            </RolePill>
+            <BadgeRow>
+              <Pill $tone={isMJ ? "mj" : "default"}>
+                {isMJ ? "🧙 MJ & Joueur" : "🎲 Joueur"}
+              </Pill>
+              {profile?.niveau && (
+                <Pill $tone="niveau">{NIVEAU_LABEL[profile.niveau]}</Pill>
+              )}
+              {profile?.poste && (
+                <Pill $tone="officer">{POSTE_LABEL[profile.poste]}</Pill>
+              )}
+            </BadgeRow>
           </ProfileInfo>
-          
+          <LogoutBtn onClick={handleLogout}>Déconnexion</LogoutBtn>
         </ProfileHeader>
 
-        {/* ── Mes inscriptions (tout le monde) ── */}
-        <SectionTitle>
-          🎟️ Mes inscriptions
-          {!loadingInsc && <Count>{inscriptions.length}</Count>}
-        </SectionTitle>
+        {/* ── Cartes de résumé : accès rapide aux sections ── */}
+        <StatGrid>
+          <StatCard onClick={() => setActiveTab("inscriptions")} style={{ animationDelay: "0s" }}>
+            <StatValue>{loadingInsc ? "…" : inscriptions.length}</StatValue>
+            <StatLabel>🎟️ Mes inscriptions</StatLabel>
+          </StatCard>
 
-        {loadingInsc ? (
-          <Loading>Chargement…</Loading>
-        ) : inscriptions.length === 0 ? (
-          <Empty>
-            Vous n'êtes inscrit à aucun événement pour le moment.
-            <br />
-            <BrowseLink href="/#events">Parcourir les événements →</BrowseLink>
-          </Empty>
-        ) : (
-          inscriptions.map((insc, i) => (
-            <Card key={insc.id} style={{ animationDelay: `${i * 0.04}s` }}>
-              <Info>
-                <EventTitleTxt>{insc.eventTitle}</EventTitleTxt>
-                <EventMeta>Catégorie : {insc.categorie}</EventMeta>
-              </Info>
-              <CancelBtn
-                onClick={() => annulerInscription(insc)}
-                disabled={cancellingId === insc.id}
-              >
-                {cancellingId === insc.id ? "Annulation…" : "Annuler"}
-              </CancelBtn>
-            </Card>
-          ))
+          {isMJ && (
+            <StatCard onClick={() => setActiveTab("evenements")} style={{ animationDelay: "0.04s" }}>
+              <StatValue>{loadingEvts ? "…" : events.length}</StatValue>
+              <StatLabel>🧙 Mes événements</StatLabel>
+            </StatCard>
+          )}
+
+          {isOfficer && (
+            <StatCard
+              $accent={unreadCount > 0}
+              onClick={() => setActiveTab("messages")}
+              style={{ animationDelay: "0.08s" }}
+            >
+              <StatValue>{unreadCount}</StatValue>
+              <StatLabel>💬 Messages non lus</StatLabel>
+            </StatCard>
+          )}
+
+          {!profile?.niveau && (
+            <StatCard $accent onClick={() => setActiveTab("profil")} style={{ animationDelay: "0.12s" }}>
+              <StatValue>!</StatValue>
+              <StatLabel>Compléter mon profil</StatLabel>
+            </StatCard>
+          )}
+        </StatGrid>
+
+        {/* ── Onglets ── */}
+        <TabBar>
+          <TabBtn $active={activeTab === "apercu"} onClick={() => setActiveTab("apercu")}>
+            Aperçu
+          </TabBtn>
+          <TabBtn $active={activeTab === "inscriptions"} onClick={() => setActiveTab("inscriptions")}>
+            🎟️ Inscriptions
+          </TabBtn>
+          {isMJ && (
+            <TabBtn $active={activeTab === "evenements"} onClick={() => setActiveTab("evenements")}>
+              🧙 Mes événements
+            </TabBtn>
+          )}
+          {isOfficer && (
+            <TabBtn $active={activeTab === "messages"} onClick={() => setActiveTab("messages")}>
+              💬 Messages
+              {unreadCount > 0 && <TabBadge>{unreadCount}</TabBadge>}
+            </TabBtn>
+          )}
+          <TabBtn $active={activeTab === "profil"} onClick={() => setActiveTab("profil")}>
+            👤 Profil
+          </TabBtn>
+        </TabBar>
+
+        {/* ── Contenu : Aperçu ── */}
+        {activeTab === "apercu" && (
+          <>
+            <SectionTitle>🎟️ Dernières inscriptions</SectionTitle>
+            {loadingInsc ? (
+              <Loading>Chargement…</Loading>
+            ) : inscriptions.length === 0 ? (
+              <Empty>
+                Vous n'êtes inscrit à aucun événement pour le moment.
+                <br />
+                <BrowseLink href="/#events">Parcourir les événements →</BrowseLink>
+              </Empty>
+            ) : (
+              inscriptions.slice(0, 3).map((insc, i) => (
+                <Card key={insc.id} style={{ animationDelay: `${i * 0.04}s` }}>
+                  <Info>
+                    <EventTitleTxt>{insc.eventTitle}</EventTitleTxt>
+                    <EventMeta>Catégorie : {insc.categorie}</EventMeta>
+                  </Info>
+                </Card>
+              ))
+            )}
+            {inscriptions.length > 3 && (
+              <BrowseLink href="#" onClick={(e) => { e.preventDefault(); setActiveTab("inscriptions"); }}>
+                Voir toutes mes inscriptions ({inscriptions.length}) →
+              </BrowseLink>
+            )}
+          </>
         )}
 
-        {/* ── Mes événements (MJ uniquement) ── */}
-        {isMJ && (
+        {/* ── Contenu : Inscriptions ── */}
+        {activeTab === "inscriptions" && (
+          <>
+            <SectionTitle>
+              🎟️ Mes inscriptions
+              {!loadingInsc && <Count>{inscriptions.length}</Count>}
+            </SectionTitle>
+
+            {loadingInsc ? (
+              <Loading>Chargement…</Loading>
+            ) : inscriptions.length === 0 ? (
+              <Empty>
+                Vous n'êtes inscrit à aucun événement pour le moment.
+                <br />
+                <BrowseLink href="/#events">Parcourir les événements →</BrowseLink>
+              </Empty>
+            ) : (
+              inscriptions.map((insc, i) => (
+                <Card key={insc.id} style={{ animationDelay: `${i * 0.04}s` }}>
+                  <Info>
+                    <EventTitleTxt>{insc.eventTitle}</EventTitleTxt>
+                    <EventMeta>Catégorie : {insc.categorie}</EventMeta>
+                  </Info>
+                  <CancelBtn
+                    onClick={() => annulerInscription(insc)}
+                    disabled={cancellingId === insc.id}
+                  >
+                    {cancellingId === insc.id ? "Annulation…" : "Annuler"}
+                  </CancelBtn>
+                </Card>
+              ))
+            )}
+          </>
+        )}
+
+        {/* ── Contenu : Mes événements (MJ) ── */}
+        {activeTab === "evenements" && isMJ && (
           <>
             <SectionTitle>
               🧙 Mes événements
@@ -595,6 +854,31 @@ export default function MonComptePage() {
                   </EventCard>
                 );
               })
+            )}
+          </>
+        )}
+
+        {/* ── Contenu : Messages (bureau) ── */}
+        {activeTab === "messages" && isOfficer && user && (
+          <OfficerInbox currentUid={user.uid} />
+        )}
+
+        {/* ── Contenu : Profil ── */}
+        {activeTab === "profil" && user && (
+          <>
+            <SectionTitle>👤 Mon profil</SectionTitle>
+            <ProfileNiveauSelector
+              uid={user.uid}
+              currentNiveau={profile?.niveau ?? null}
+              onSaved={(niveau: NiveauChoice) => setProfile(prev => prev ? { ...prev, niveau } : prev)}
+            />
+            {isDebutant && (
+              <div style={{ marginTop: "1rem" }}>
+                <ContactOfficers
+                  currentUid={user.uid}
+                  currentName={profile?.pseudo || `${profile?.prenom || ""} ${profile?.nom || ""}`.trim() || "Aventurier"}
+                />
+              </div>
             )}
           </>
         )}
