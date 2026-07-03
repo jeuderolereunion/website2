@@ -2,7 +2,7 @@
 
 import styled, { keyframes } from "styled-components";
 import { useEffect, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { auth, db } from "@/lib/firebase";
 import Link from "next/link";
 import { doc, getDoc } from "firebase/firestore";
@@ -125,6 +125,21 @@ const AccountBtn = styled(Link)`
   &:hover { background: rgba(255, 255, 255, 0.07); color: #fff; }
 `;
 
+// ─── Placeholder pendant la vérification de session ──────────────────────────
+// Réserve la même largeur/hauteur que les boutons pour éviter tout saut de
+// mise en page (layout shift) pendant les ~quelques centaines de ms où l'on
+// ne sait pas encore si l'utilisateur est connecté.
+
+const AuthPlaceholder = styled.div`
+  width: 160px;
+  height: 32px;
+`;
+
+const MobileAuthPlaceholder = styled.div`
+  flex: 1;
+  height: 38px;
+`;
+
 // ─── Hamburger ────────────────────────────────────────────────────────────────
 
 const HamburgerBtn = styled.button`
@@ -221,8 +236,6 @@ const MobileAccountBtn = styled(AccountBtn)`
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function navigate(path: string) { window.location.href = path; }
-
 function goToSection(id: string, isHome: boolean) {
   if (isHome) {
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
@@ -234,11 +247,13 @@ function goToSection(id: string, isHome: boolean) {
 // ─── Composant ────────────────────────────────────────────────────────────────
 
 export default function Navigation() {
-  const [user, setUser]       = useState<User | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const pathname              = usePathname();
-  const isHome                = pathname === "/";
+  const [user, setUser]               = useState<User | null>(null);
+  const [isAdmin, setIsAdmin]         = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [menuOpen, setMenuOpen]       = useState(false);
+  const pathname                      = usePathname();
+  const router                        = useRouter();
+  const isHome                        = pathname === "/";
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -249,12 +264,19 @@ export default function Navigation() {
       } else {
         setIsAdmin(false);
       }
+      setAuthLoading(false);
     });
     return () => unsub();
   }, []);
 
   // Fermer le menu au changement de route
   useEffect(() => { setMenuOpen(false); }, [pathname]);
+
+  // Navigation client (App Router) : évite le rechargement complet de page
+  // et donc la relecture systématique de la session Firebase à chaque clic.
+  function navigate(path: string) {
+    router.push(path);
+  }
 
   function handleNav(action: () => void) {
     action();
@@ -279,7 +301,9 @@ export default function Navigation() {
         <AuthButtons>
           {/* Desktop auth — caché en mobile pour laisser la place au hamburger */}
           <DesktopOnly>
-            {!user ? (
+            {authLoading ? (
+              <AuthPlaceholder />
+            ) : !user ? (
               <>
                 <OutlineBtn
                   onClick={() => navigate(`/login?redirect=${encodeURIComponent(pathname)}`)}
@@ -319,7 +343,9 @@ export default function Navigation() {
         <MobileDivider />
 
         <MobileAuthRow>
-          {!user ? (
+          {authLoading ? (
+            <MobileAuthPlaceholder />
+          ) : !user ? (
             <>
               <MobileOutlineBtn
                 onClick={() => handleNav(() => navigate(`/login?redirect=${encodeURIComponent(pathname)}`))}
