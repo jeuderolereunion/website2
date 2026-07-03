@@ -422,7 +422,9 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
     if (code === "auth/weak-password") return "Le mot de passe est trop faible.";
     if (code === "auth/wrong-password" || code === "auth/invalid-credential") return "Email ou mot de passe incorrect.";
     if (code === "auth/user-not-found") return "Aucun compte associé à cet email.";
+    if (code === "auth/user-disabled") return "Ce compte a été désactivé. Contactez un administrateur.";
     if (code === "auth/too-many-requests") return "Trop de tentatives. Réessayez plus tard.";
+    if (code === "auth/network-request-failed") return "Problème de connexion réseau. Vérifiez votre connexion et réessayez.";
     if (code === "auth/popup-closed-by-user") return "Connexion Google annulée.";
     if (code === "auth/popup-blocked") return "La fenêtre Google a été bloquée par le navigateur. Autorisez les popups et réessayez.";
     if (code === "auth/unauthorized-domain") return "Ce domaine n'est pas autorisé pour la connexion Google. Contactez le support.";
@@ -433,10 +435,18 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
     return err?.message || "Une erreur est survenue. Veuillez réessayer.";
   }
 
+  // ─── Normalise l'email (trim + minuscule) pour éviter toute désync ──────
+  // entre Firebase Auth et le document Firestore (ex: "Test@Mail.com" vs
+  // "test@mail.com" traités comme deux comptes différents par Auth alors
+  // qu'ils correspondraient au même profil Firestore).
+  function normalizeEmail(raw: string): string {
+    return raw.trim().toLowerCase();
+  }
+
   // ─── Crée le profil Firestore pour un utilisateur Google + redirige ─────
 
   async function finalizeGoogleProfile(user: any, chosenRole: RoleChoice) {
-    const [prenom, ...nomParts] = (user.displayName || "").split(" ");
+    const [prenom, ...nomParts] = (user.displayName || "").trim().split(" ");
     const userNom = nomParts.join(" ") || "Utilisateur";
 
     await setDoc(doc(db, "users", user.uid), {
@@ -444,7 +454,7 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
       prenom: prenom || "",
       nom: userNom,
       pseudo: user.displayName || "",
-      email: user.email || "",
+      email: (user.email || "").toLowerCase(),
       role: chosenRole,
       isMJ: chosenRole === "mj",
       createdAt: serverTimestamp(),
@@ -513,6 +523,12 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
 
       router.push(redirectTo);
     } catch (err: any) {
+      // Edge case : si l'erreur survient après un signInWithPopup réussi
+      // (ex: getDoc qui échoue pour une raison réseau/permission imprévue),
+      // l'utilisateur resterait connecté côté Firebase Auth sans profil
+      // Firestore ni retour clair. On force la déconnexion par sécurité,
+      // sauf si un signOut() a déjà été fait explicitement plus haut.
+      await signOut(auth).catch(() => {});
       setError(translateError(err));
     } finally {
       setLoading(false);
@@ -539,6 +555,7 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
     // aucun document Firestore n'a été créé, on déconnecte le compte Auth.
     await signOut(auth).catch(() => {});
     setPendingGoogleUser(null);
+    setError(""); // évite qu'un message d'erreur résiduel réapparaisse si l'utilisateur relance le flux
   }
 
   // ─── Fonction pour gérer l'inscription/connexion ────────────────────────
@@ -550,15 +567,20 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
     try {
       setLoading(true);
 
+      const normalizedEmail = normalizeEmail(email);
+
       if (mode === "register") {
         // ─── Validation des champs ─────────────────────────────────────
-        if (!prenom.trim()) throw new Error("Le prénom est obligatoire.");
-        if (!nom.trim()) throw new Error("Le nom est obligatoire.");
+        const trimmedPrenom = prenom.trim();
+        const trimmedNom = nom.trim();
+
+        if (!trimmedPrenom) throw new Error("Le prénom est obligatoire.");
+        if (!trimmedNom) throw new Error("Le nom est obligatoire.");
         if (password.length < 8) throw new Error("Le mot de passe doit contenir au moins 8 caractères.");
         if (password !== confirmPassword) throw new Error("Les mots de passe ne correspondent pas.");
 
         // ─── Créer le compte utilisateur ───────────────────────────────
-        const credential = await createUserWithEmailAndPassword(auth, email, password);
+        const credential = await createUserWithEmailAndPassword(auth, normalizedEmail, password);
 
         try {
           // Email de vérification natif Firebase
@@ -569,7 +591,7 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
             await fetch("/api/register-email", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ email, prenom, nom, role }),
+              body: JSON.stringify({ email: normalizedEmail, prenom: trimmedPrenom, nom: trimmedNom, role }),
             });
           } catch (emailError) {
             console.warn("Erreur lors de l'envoi de l'email de bienvenue:", emailError);
@@ -578,10 +600,10 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
           // Créer le document utilisateur en Firestore
           await setDoc(doc(db, "users", credential.user.uid), {
             uid: credential.user.uid,
-            prenom,
-            nom,
-            pseudo: `${prenom} ${nom}`,
-            email: email.toLowerCase(),
+            prenom: trimmedPrenom,
+            nom: trimmedNom,
+            pseudo: `${trimmedPrenom} ${trimmedNom}`,
+            email: normalizedEmail,
             role,
             isMJ: role === "mj",
             // Le compte doit être validé par un admin avant de devenir "active"
@@ -595,7 +617,9 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
         } catch (innerErr) {
           // Rollback : si une étape échoue après la création du compte Auth,
           // on supprime ce compte fantôme pour libérer l'email pour un nouvel essai.
-          await credential.user.delete().catch(() => {});
+          await credential.user.delete().catch((delErr) => {
+            console.error("Échec du rollback (suppression du compte Auth) :", delErr);
+          });
           throw innerErr;
         }
 
@@ -605,7 +629,7 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
 
       } else {
         // ─── Mode Login ────────────────────────────────────────────────
-        const credential = await signInWithEmailAndPassword(auth, email, password);
+        const credential = await signInWithEmailAndPassword(auth, normalizedEmail, password);
 
         const userSnap = await getDoc(doc(db, "users", credential.user.uid));
 
@@ -666,6 +690,7 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
                       placeholder="Votre prénom"
                       value={prenom}
                       onChange={e => setPrenom(e.target.value)}
+                      autoComplete="given-name"
                       required
                     />
                   </Field>
@@ -677,6 +702,7 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
                       placeholder="Votre nom"
                       value={nom}
                       onChange={e => setNom(e.target.value)}
+                      autoComplete="family-name"
                       required
                     />
                   </Field>
@@ -720,6 +746,7 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
                 placeholder="votre@email.com"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
+                autoComplete="email"
                 required
               />
             </Field>
@@ -733,12 +760,14 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
                   placeholder={isLogin ? "••••••••" : "8 caractères minimum"}
                   value={password}
                   onChange={e => setPassword(e.target.value)}
+                  autoComplete={isLogin ? "current-password" : "new-password"}
                   required
                 />
                 <PasswordToggle
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
                   title={showPassword ? "Masquer" : "Afficher"}
+                  aria-label={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
                   tabIndex={-1}
                 >
                   {showPassword ? "👁️" : "👁️‍🗨️"}
@@ -756,12 +785,14 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
                     placeholder="••••••••"
                     value={confirmPassword}
                     onChange={e => setConfirmPassword(e.target.value)}
+                    autoComplete="new-password"
                     required
                   />
                   <PasswordToggle
                     type="button"
                     onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                     title={showConfirmPassword ? "Masquer" : "Afficher"}
+                    aria-label={showConfirmPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
                     tabIndex={-1}
                   >
                     {showConfirmPassword ? "👁️" : "👁️‍🗨️"}
@@ -770,7 +801,7 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
               </Field>
             )}
 
-            {error && <ErrorBox>{error}</ErrorBox>}
+            {error && <ErrorBox role="alert">{error}</ErrorBox>}
 
             <SubmitBtn type="submit" disabled={loading}>
               {loading
@@ -839,7 +870,7 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
               </RoleCard>
             </RoleGroup>
 
-            {error && <ErrorBox>{error}</ErrorBox>}
+            {error && <ErrorBox role="alert">{error}</ErrorBox>}
 
             <SubmitBtn
               type="button"
