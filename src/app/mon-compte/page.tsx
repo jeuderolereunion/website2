@@ -6,7 +6,7 @@ import Link from "next/link";
 import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged, signOut, User } from "firebase/auth";
 import Navigation from "@/components/Navigation";
-import ProfileNiveauSelector from "@/components/ProfileNiveauSelector";
+import Profileniveauselector from "@/components/ProfileNiveauSelector";
 import ContactOfficers from "@/components/ContactOfficers";
 import OfficerInbox from "@/components/OfficerInbox";
 import { subscribeToConversations, Conversation } from "@/lib/chat";
@@ -874,7 +874,7 @@ export default function MonComptePage() {
         {activeTab === "profil" && user && (
           <>
             <SectionTitle>👤 Mon profil</SectionTitle>
-            <ProfileNiveauSelector
+            <Profileniveauselector
               uid={user.uid}
               currentNiveau={profile?.niveau ?? null}
               onSaved={(niveau: NiveauChoice) => setProfile(prev => prev ? { ...prev, niveau } : prev)}
