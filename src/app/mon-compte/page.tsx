@@ -874,7 +874,7 @@ export default function MonComptePage() {
         {activeTab === "profil" && user && (
           <>
             <SectionTitle>👤 Mon profil</SectionTitle>
-            <ProfileNiveauselector
+            <ProfileNiveauSelector
               uid={user.uid}
               currentNiveau={profile?.niveau ?? null}
               onSaved={(niveau: NiveauChoice) => setProfile(prev => prev ? { ...prev, niveau } : prev)}
