@@ -12,6 +12,7 @@ import { db, auth } from "@/lib/firebase";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { runTransaction } from "firebase/firestore";
 import Navigation from "@/components/Navigation";
+import { LIEUX } from "@/lib/lieux";
 
 import {
   collection,
@@ -33,6 +34,8 @@ const fadeUp = keyframes`
   to   { opacity: 1; transform: translateY(0); }
 `;
 
+
+
 // ─── Styled components ────────────────────────────────────────────────────────
 
 const Page = styled.main`
@@ -42,6 +45,123 @@ const Page = styled.main`
   font-family: 'Inter', system-ui, sans-serif;
   padding: 0 0 5rem;
 `;
+const VenueGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1.25rem;
+  margin-bottom: 3rem;
+  @media (max-width: 400px) {
+    grid-template-columns: 1fr;
+  }
+`;
+
+const VenueCard = styled(Link)`
+  display: block;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 16px;
+  overflow: hidden;
+  text-decoration: none;
+  color: #fff;
+  transition: transform 180ms ease, border-color 180ms ease, background 180ms ease;
+  animation: ${fadeUp} 0.4s ease both;
+  &:hover {
+    transform: translateY(-3px);
+    background: rgba(255,255,255,0.08);
+    border-color: rgba(0,188,212,0.4);
+  }
+  @media (hover: none) {
+    &:hover { transform: none; }
+  }
+`;
+
+const VenueImageHeader = styled.div<{ $bgImage?: string }>`
+  height: 130px;
+  background: ${p =>
+    p.$bgImage
+      ? `linear-gradient(180deg, rgba(13,13,20,0.05) 0%, rgba(13,13,20,0.9) 100%), url(${p.$bgImage})`
+      : "linear-gradient(135deg, rgba(0,188,212,0.25) 0%, rgba(0,188,212,0.05) 100%)"};
+  background-size: cover;
+  background-position: center;
+  display: flex;
+  align-items: flex-end;
+  padding: 0.85rem 1rem;
+`;
+
+const VenueRecurringTag = styled.span`
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(0,0,0,0.5);
+  backdrop-filter: blur(4px);
+  color: #4dd0e1;
+  border: 1px solid rgba(0,188,212,0.4);
+`;
+
+const VenueBody = styled.div`
+  padding: 1.1rem 1.25rem 1.25rem;
+`;
+
+const VenueName = styled.h3`
+  font-size: 1.05rem;
+  font-weight: 700;
+  margin: 0 0 0.3rem;
+`;
+
+const VenueAddress = styled.p`
+  font-size: 0.8rem;
+  color: rgba(255,255,255,0.5);
+  margin: 0 0 0.6rem;
+`;
+
+const VenueSchedule = styled.p`
+  font-size: 0.78rem;
+  color: #4dd0e1;
+  font-weight: 600;
+  margin: 0 0 1rem;
+`;
+
+const VenueDateTimeRow = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: #fff;
+  font-weight: 700;
+  margin: 0.6rem 0 0.2rem;
+`;
+
+const VenueDuration = styled.span`
+  font-size: 0.75rem;
+  color: rgba(255,255,255,0.45);
+`;
+
+const VenueMeta = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 0.9rem;
+  margin-top: 0.75rem;
+  border-top: 0.5px solid rgba(255,255,255,0.08);
+`;
+
+const VenueNextDate = styled.span`
+  font-size: 0.78rem;
+  color: rgba(255,255,255,0.6);
+`;
+
+const VenueCount = styled.span`
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(0,188,212,0.15);
+  border: 1px solid rgba(0,188,212,0.3);
+  color: #4dd0e1;
+  white-space: nowrap;
+`;
+
 
 const Hero = styled.section`
   position: relative;
@@ -55,6 +175,30 @@ const Hero = styled.section`
     background: radial-gradient(ellipse 70% 50% at 50% 0%, rgba(120,80,255,0.18) 0%, transparent 70%);
     pointer-events: none;
   }
+`;
+
+const SeriesGroup = styled.div`
+  margin-bottom: 2rem;
+`;
+
+const SeriesHeader = styled.h3`
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: rgba(255,255,255,0.85);
+  margin: 0 0 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+`;
+
+const SeriesRecurringTag = styled.span`
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: rgba(0,188,212,0.15);
+  border: 1px solid rgba(0,188,212,0.3);
+  color: #4dd0e1;
 `;
 
 const BackLink = styled(Link)`
@@ -695,8 +839,9 @@ type EventDoc = {
   systeme?: string;
   tags?: string[];
   image?: string;
-  ville?: string;      // ex: "Saint-Denis", "Saint-Pierre"...
-  secteur?: string;     // optionnel — si absent, déduit de "ville"
+  ville?: string;
+  secteur?: string;
+  lieu?: string;   // ← ajouté : slug du lieu (ex: "3brasseurs"), rempli par l'admin
 };
 
 type UserProfile = {
@@ -707,17 +852,17 @@ type UserProfile = {
 // ─── Catégories ───────────────────────────────────────────────────────────────
 
 const categories: Record<string, { icon: string; title: string; subtitle: string }> = {
-  "soirees-jdr":  { icon: "🎲", title: "Soirées JDR",   subtitle: "Sessions de jeu de rôle régulières ouvertes à tous les niveaux." },
+  "soirees-jdr":  { icon: "🎲", title: "Sessions JDR",   subtitle: "Sessions de jeu de rôle régulières ouvertes à tous les niveaux." },
   "tournois":     { icon: "🏆", title: "Tournois",       subtitle: "Compétitions amicales entre joueurs pour tester vos compétences." },
   "soirees-jeux": { icon: "🃏", title: "Soirées Jeux",   subtitle: "Jeux de société et de plateau pour varier les plaisirs." },
-  "initiations":  { icon: "📖", title: "Initiations",    subtitle: "Ateliers pour découvrir le jeu de rôle de zéro, dans un cadre bienveillant." },
+  "animations":  { icon: "📖", title: "Animations",    subtitle: "Ateliers pour découvrir le jeu de rôle de zéro, dans un cadre bienveillant." },
 };
 
 const TYPE_COLORS: Record<string, string> = {
   "soirees-jdr":  "#7c4dff",
   "tournois":     "#c9a84c",
   "soirees-jeux": "#e91e8c",
-  "initiations":  "#00bcd4",
+  "animations":  "#00bcd4",
   default:        "#5c6bc0",
 };
 
@@ -822,7 +967,13 @@ function getStatusBadge(placesDispo: number): { status: "ok" | "low" | "full"; l
   if (placesDispo <= 2) return { status: "low",  label: `${placesDispo} place${placesDispo > 1 ? "s" : ""}` };
   return { status: "ok", label: `${placesDispo} places` };
 }
+const JOURS_SEMAINE = ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"];
 
+function getJourRecurrent(dateISO: string): string {
+  const [y, m, d] = dateISO.split("-").map(Number);
+  const date = new Date(y, m - 1, d);
+  return JOURS_SEMAINE[date.getDay()];
+}
 // ─── Composant ────────────────────────────────────────────────────────────────
 
 export default function EventPageClient({ slug }: { slug: string }) {
@@ -845,7 +996,7 @@ export default function EventPageClient({ slug }: { slug: string }) {
   // Cache des noms MJ résolus depuis Firestore "users", pour les events
   // qui n'ont pas encore le champ dénormalisé mjNom.
   const [mjProfiles, setMjProfiles]     = useState<Record<string, string>>({});
-
+ 
   // ── Auth + profil ─────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -1063,6 +1214,21 @@ export default function EventPageClient({ slug }: { slug: string }) {
   });
   const upcoming = filtered.filter(e => e.date >= now);
   const past     = filtered.filter(e => e.date < now);
+   const venuesAvecStats = slug === "animations"
+    ? Object.entries(LIEUX).map(([lieuSlug, info]) => {
+        const eventsDuLieu = upcoming
+          .filter(e => e.lieu === lieuSlug)
+          .sort((a, b) => a.date.localeCompare(b.date));
+        const prochaine = eventsDuLieu[0] ?? null;
+        return {
+          lieuSlug,
+          info,
+          count: eventsDuLieu.length,
+          prochaine,
+          jourRecurrent: prochaine ? getJourRecurrent(prochaine.date) : null,
+        };
+      })
+    : [];
 
   // ── Rendu card ────────────────────────────────────────────────────────────
 
@@ -1160,11 +1326,13 @@ export default function EventPageClient({ slug }: { slug: string }) {
         <HeroSubtitle>{cat.subtitle}</HeroSubtitle>
       </Hero>
 
-      <ProposeRow>
-        <ProposeLink href="/proposer-evenement">
-          ➕ Proposer un événement
-        </ProposeLink>
-      </ProposeRow>
+      {slug !== "animations" && (
+  <ProposeRow>
+    <ProposeLink href="/proposer-evenement">
+      ➕ Proposer un événement
+    </ProposeLink>
+  </ProposeRow>
+)}
 
       <FiltersRow>
         {(["all", "upcoming", "past"] as const).map(f => (
@@ -1231,7 +1399,51 @@ export default function EventPageClient({ slug }: { slug: string }) {
           <EmptyState>Aucun événement pour le moment. Revenez bientôt !</EmptyState>
         )}
 
-        {!loading && upcoming.length > 0 && (
+          {!loading && slug === "animations" && (
+          <>
+            <SectionLabel>Nos lieux d&apos;animation</SectionLabel>
+            <VenueGrid>
+              {venuesAvecStats.map(({ lieuSlug, info, count, prochaine, jourRecurrent }) => (
+                <VenueCard key={lieuSlug} href={`/evenements/animations/${lieuSlug}`}>
+                  <VenueImageHeader $bgImage={info.image}>
+                    {jourRecurrent && (
+                      <VenueRecurringTag>🔁 Chaque {jourRecurrent}</VenueRecurringTag>
+                    )}
+                  </VenueImageHeader>
+
+                  <VenueBody>
+                    <VenueName>{info.venue}</VenueName>
+                    <VenueAddress>📍 {info.adresse}</VenueAddress>
+
+                    {prochaine ? (
+                      <>
+                        <VenueDateTimeRow>
+                          🗓️ {formatDateFr(prochaine.date)} · 🕒 {prochaine.heure}
+                        </VenueDateTimeRow>
+                        {prochaine.duree && (
+                          <VenueDuration>Durée : {prochaine.duree}</VenueDuration>
+                        )}
+                      </>
+                    ) : (
+                      <VenueSchedule>🗓️ {info.schedule}</VenueSchedule>
+                    )}
+
+                    <VenueMeta>
+                      <VenueNextDate>
+                        {prochaine ? "Prochaine séance" : "Aucune date programmée"}
+                      </VenueNextDate>
+                      {count > 0 && (
+                        <VenueCount>{count} date{count > 1 ? "s" : ""}</VenueCount>
+                      )}
+                    </VenueMeta>
+                  </VenueBody>
+                </VenueCard>
+              ))}
+            </VenueGrid>
+          </>
+        )}
+
+        {!loading && slug !== "animations" && upcoming.length > 0 && (
           <>
             <SectionLabel>À venir</SectionLabel>
             <Grid>
@@ -1240,7 +1452,7 @@ export default function EventPageClient({ slug }: { slug: string }) {
           </>
         )}
 
-        {!loading && past.length > 0 && (
+        {!loading && slug !== "animations" && past.length > 0 && (
           <>
             <SectionLabel>Événements passés</SectionLabel>
             <Grid>

@@ -6,7 +6,7 @@ import Link from "next/link";
 import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged, signOut, User } from "firebase/auth";
 import Navigation from "@/components/Navigation";
-import ProfileNiveauSelector from "@/components/Profileniveauselector";
+import ProfileNiveauSelector from "@/components/ProfileNiveauselector";
 import ContactOfficers from "@/components/ContactOfficers";
 import OfficerInbox from "@/components/OfficerInbox";
 import { subscribeToConversations, Conversation } from "@/lib/chat";
@@ -591,24 +591,31 @@ export default function MonComptePage() {
     }
   }
 
-  async function toggleEvent(eventId: string) {
-    if (openEventId === eventId) {
-      setOpenEventId(null);
-      return;
-    }
-    setOpenEventId(eventId);
+ async function toggleEvent(eventId: string) {
+  if (openEventId === eventId) {
+    setOpenEventId(null);
+    return;
+  }
+  setOpenEventId(eventId);
 
-    if (!participants[eventId]) {
-      setLoadingParticipants(eventId);
+  if (!participants[eventId]) {
+    setLoadingParticipants(eventId);
+    try {
       const q = query(collection(db, "inscriptions"), where("eventId", "==", eventId));
       const snap = await getDocs(q);
+      console.log("Participants trouvés:", snap.docs.length, snap.docs.map(d => d.data()));
       setParticipants(prev => ({
         ...prev,
         [eventId]: snap.docs.map(d => ({ id: d.id, ...d.data() })) as ParticipantInscription[],
       }));
+    } catch (err) {
+      console.error("Erreur chargement participants:", err);
+      setParticipants(prev => ({ ...prev, [eventId]: [] }));
+    } finally {
       setLoadingParticipants(null);
     }
   }
+}
 
   async function retirerParticipant(eventId: string, p: ParticipantInscription) {
     if (!confirm(`Retirer ${p.pseudo || p.nom} de cet événement ?`)) return;

@@ -814,10 +814,10 @@ export default function ProposerEvenementPage() {
           <Field>
             <Label>Catégorie</Label>
             <Select value={form.categorie} onChange={e => setForm({ ...form, categorie: e.target.value })}>
-              <option value="soirees-jdr">Soirées JDR</option>
+              <option value="soirees-jdr">Sessions JDR</option>
               <option value="tournois">Tournois</option>
               <option value="soirees-jeux">Soirées Jeux</option>
-              <option value="initiations">Initiations</option>
+              <option value="animations">Animations</option>
             </Select>
           </Field>
 

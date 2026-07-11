@@ -5,7 +5,7 @@ export function generateStaticParams() {
     { slug: "soirees-jdr" },
     { slug: "tournois" },
     { slug: "soirees-jeux" },
-    { slug: "initiations" },
+    { slug: "animations" },
   ];
 }
 

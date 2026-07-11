@@ -1,10 +1,11 @@
 "use client";
 
 import styled from "styled-components";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { db, auth } from "@/lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import Navigation from "@/components/Navigation";
+
 import {
   collection,
   getDocs,
@@ -12,6 +13,7 @@ import {
   deleteDoc,
   doc,
   getDoc,
+   setDoc, 
   updateDoc,
   query,
   where,
@@ -59,6 +61,32 @@ type Ressource = {
   url: string;
 };
 
+type TableAnimee = {
+  id: string;
+  animationId: string;
+  mjId: string;
+  mjNom: string;
+  titre: string;
+  systeme: string;
+  description: string;
+  places: number;
+  inscrits: number;
+  heure?: string;
+  status?: "pending" | "approved" | "rejected";  // ← ajouté
+  createdAt?: any;
+};
+
+type InscriptionAnimation = {
+  id: string;
+  animationId: string;
+  userId: string;
+  prenom?: string;
+  nom?: string;
+  pseudo?: string;
+  email: string;
+  createdAt?: any;
+};
+
 // Ressource proposée par un utilisateur, en attente de validation admin
 type PropositionRessource = {
   id: string;
@@ -93,7 +121,6 @@ type PendingUser = {
   createdAt?: any;
 };
 
-
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
 const TYPES_RESSOURCE: { value: TypeRessource; label: string }[] = [
@@ -104,6 +131,34 @@ const TYPES_RESSOURCE: { value: TypeRessource; label: string }[] = [
   { value: "scenario",  label: "Scénario & aventure" },
 ];
 
+const FORM_ANIMATION_VIDE = {
+  titre: "",
+  description: "",
+  categorie: "animations",
+  date: "",
+  heure: "20:00",
+  duree: "3h",
+  niveau: "Tous niveaux",
+  places: 6,
+  systeme: "",
+  tags: "",
+  image: "",
+  lieuType: "presentiel" as "presentiel" | "ligne",
+  lieu: "",              // ← remplace ville + adresse : slug choisi dans LIEUX
+  lieuDetail: "",         // reste utilisé uniquement si lieuType === "ligne"
+  mjId: "",
+  mjNom: "",
+  recurrence: "unique" as "unique" | "hebdomadaire",
+};
+
+const NOM_JOUR = ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"];
+
+
+const LIEUX: Record<string, { label: string; ville: string; adresse: string }> = {
+  "3brasseurs": { label: "3 Brasseurs (Saint-Paul)", ville: "Saint-Paul", adresse: "Front de mer, Saint-Paul" },
+  "la-kour":    { label: "La Kour (Saint-Leu)",       ville: "Saint-Leu", adresse: "La Kour, Saint-Leu" },
+  "qg-tampon":  { label: "QG association (Le Tampon)", ville: "Le Tampon", adresse: "Le Tampon" },
+};
 const UNIVERS_SUGGESTIONS = [
   "Donjons & Dragons",
   "Pathfinder",
@@ -582,49 +637,108 @@ const PropositionHeader = styled.div`
   flex-wrap: wrap;
 `;
 
+type AnimationPubliee = {
+  id: string;
+  titre: string;
+  description: string;
+  categorie: string;
+  date: string;
+  heure: string;
+  duree?: string;
+  niveau: string;
+  places: number;
+  inscrits: number;
+  systeme?: string;
+  tags?: string[];
+  image?: string;
+  lieuType?: "presentiel" | "ligne";
+  lieu?: string;          // ← ajouté : slug du lieu, ex "3brasseurs"
+  adresse?: string;
+  ville?: string;
+  lieuDetail?: string;
+  mjId?: string;
+  mjNom?: string;
+  recurrent?: boolean;
+  recurrenceId?: string;
+};
+
 // ─── Composant principal ──────────────────────────────────────────────────────
 
 export default function AdminPage() {
-  const [authorized, setAuthorized]     = useState(false);
+  const [formAnim, setFormAnim] = useState(FORM_ANIMATION_VIDE);
+  const [submittingAnim, setSubmittingAnim] = useState(false);
+  const [messageAnim, setMessageAnim] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+  const [mjs, setMjs] = useState<{ id: string; nom: string }[]>([]);
+const [editingOccurrence, setEditingOccurrence] = useState<string | null>(null);
+const [editDate, setEditDate] = useState("");
+const [editHeure, setEditHeure] = useState("");
+  const [animations, setAnimations] = useState<AnimationPubliee[]>([]);
+  const [loadingAnimations, setLoadingAnimations] = useState(true);
+  const [authorized, setAuthorized] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
-  const [onglet, setOnglet] = useState<"evenements" | "ressources" | "comptes" | "membres">("comptes");
-  const [membres, setMembres]             = useState<Utilisateur[]>([]);
+
+  // ── Onglets ────────────────────────────────────────────────────────────────
+  // "evenements"        → propositions d'événements classiques soumises par les
+  //                        joueurs/MJ (collection "propositions_evenements")
+  // "animations"        → création/suivi des animations gérées directement par
+  //                        l'admin (collection "evenements", categorie "animations")
+  // "tables"            → tables proposées par les MJ sur les animations
+  // "inscriptions-anim" → inscriptions des joueurs aux animations
+  const [onglet, setOnglet] = useState<
+    | "evenements"
+    | "ressources"
+    | "comptes"
+    | "membres"
+    | "animations"
+    | "tables"
+    | "inscriptions-anim"
+  >("comptes");
+
+  const [membres, setMembres] = useState<Utilisateur[]>([]);
   const [loadingMembres, setLoadingMembres] = useState(true);
-const [rechercheMembre, setRechercheMembre] = useState("");
-const [filtreRole, setFiltreRole]        = useState<"tous" | "joueur" | "mj">("tous");
+  const [rechercheMembre, setRechercheMembre] = useState("");
+  const [filtreRole, setFiltreRole] = useState<"tous" | "joueur" | "mj">("tous");
+
   // ── État événements ────────────────────────────────────────────────────────
-  const [propositions, setPropositions]   = useState<Proposition[]>([]);
-  const [loadingEvts, setLoadingEvts]     = useState(true);
+  const [propositions, setPropositions] = useState<Proposition[]>([]);
+  const [loadingEvts, setLoadingEvts] = useState(true);
+
+  const [tables, setTables] = useState<TableAnimee[]>([]);
+  const [loadingTables, setLoadingTables] = useState(true);
+  const [inscriptionsAnim, setInscriptionsAnim] = useState<InscriptionAnimation[]>([]);
+  const [loadingInscAnim, setLoadingInscAnim] = useState(true);
 
   // ── État ressources ────────────────────────────────────────────────────────
-  const [ressources, setRessources]       = useState<Ressource[]>([]);
-  const [loadingRes, setLoadingRes]       = useState(true);
-  const [form, setForm]                   = useState(FORM_VIDE);
-  const [submitting, setSubmitting]       = useState(false);
-  const [message, setMessage]             = useState<{ type: "ok" | "err"; text: string } | null>(null);
+  const [ressources, setRessources] = useState<Ressource[]>([]);
+  const [loadingRes, setLoadingRes] = useState(true);
+  const [form, setForm] = useState(FORM_VIDE);
+  const [submitting, setSubmitting] = useState(false);
+  const [message, setMessage] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
   // ── État propositions de ressources (soumises par les utilisateurs) ───────
   const [propositionsRessources, setPropositionsRessources] = useState<PropositionRessource[]>([]);
-  const [loadingPropRes, setLoadingPropRes]                 = useState(true);
+  const [loadingPropRes, setLoadingPropRes] = useState(true);
 
   // ── État comptes en attente ───────────────────────────────────────────────
-  const [pendingUsers, setPendingUsers]   = useState<PendingUser[]>([]);
-  const [loadingUsers, setLoadingUsers]   = useState(true);
+  const [pendingUsers, setPendingUsers] = useState<PendingUser[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(true);
 
   // ── Garde anti-double-clic ─────────────────────────────────────────────────
   // Regroupe les IDs (événements, ressources, comptes, propositions...) en cours
   // de traitement, pour désactiver les boutons et bloquer les appels concurrents.
   const [processingIds, setProcessingIds] = useState<Set<string>>(new Set());
-const nbJoueurs = membres.filter(u => u.role !== "mj").length;
-const nbMJ      = membres.filter(u => u.role === "mj").length;
 
-const membresFiltres = membres.filter(u => {
-  const matchRole = filtreRole === "tous"
-    ? true
-    : filtreRole === "mj" ? u.role === "mj" : u.role !== "mj";
-  const texte = `${u.prenom || ""} ${u.nom || ""} ${u.pseudo || ""} ${u.email}`.toLowerCase();
-  return matchRole && texte.includes(rechercheMembre.toLowerCase());
-});
+  const nbJoueurs = membres.filter(u => u.role !== "mj").length;
+  const nbMJ = membres.filter(u => u.role === "mj").length;
+
+  const membresFiltres = membres.filter(u => {
+    const matchRole = filtreRole === "tous"
+      ? true
+      : filtreRole === "mj" ? u.role === "mj" : u.role !== "mj";
+    const texte = `${u.prenom || ""} ${u.nom || ""} ${u.pseudo || ""} ${u.email}`.toLowerCase();
+    return matchRole && texte.includes(rechercheMembre.toLowerCase());
+  });
+
   function startProcessing(id: string) {
     setProcessingIds(prev => new Set(prev).add(id));
   }
@@ -636,6 +750,216 @@ const membresFiltres = membres.filter(u => {
       return next;
     });
   }
+  function nettoyerUndefined<T extends Record<string, any>>(obj: T): T {
+  const result = { ...obj };
+  for (const key in result) {
+    if (result[key] === undefined) {
+      delete result[key];
+    }
+  }
+  return result;
+}
+
+  function ajouterJours(dateISO: string, jours: number): string {
+    const [y, m, d] = dateISO.split("-").map(Number);
+    const dt = new Date(y, m - 1, d);
+    dt.setDate(dt.getDate() + jours);
+    const yy = dt.getFullYear();
+    const mm = String(dt.getMonth() + 1).padStart(2, "0");
+    const dd = String(dt.getDate()).padStart(2, "0");
+    return `${yy}-${mm}-${dd}`;
+  }
+
+  // Vrai si la date (format ISO "YYYY-MM-DD") tombe entre aujourd'hui et
+  // dans 31 jours — utilisé pour ne montrer/générer les occurrences
+  // récurrentes que sur "le mois à venir".
+  function estDansLeMoisAVenir(dateISO: string): boolean {
+    const [y, m, d] = dateISO.split("-").map(Number);
+    const dt = new Date(y, m - 1, d);
+    const aujourdHui = new Date();
+    aujourdHui.setHours(0, 0, 0, 0);
+    const dansUnMois = new Date(aujourdHui);
+    dansUnMois.setDate(dansUnMois.getDate() + 31);
+    return dt >= aujourdHui && dt <= dansUnMois;
+  }
+
+  async function chargerTables() {
+    setLoadingTables(true);
+    // On parcourt toutes les sous-collections "tables" des animations
+    const evts = await getDocs(
+      query(collection(db, "evenements"), where("categorie", "==", "animations"))
+    );
+    const all: TableAnimee[] = [];
+    for (const evt of evts.docs) {
+      const tablesSnap = await getDocs(collection(db, "evenements", evt.id, "tables"));
+      tablesSnap.docs.forEach(d => {
+        all.push({ id: d.id, animationId: evt.id, ...d.data() } as TableAnimee);
+      });
+    }
+    setTables(all);
+    setLoadingTables(false);
+  }
+
+  async function validerTable(table: TableAnimee) {
+  if (processingIds.has(table.id)) return;
+  startProcessing(table.id);
+  try {
+    await updateDoc(doc(db, "evenements", table.animationId, "tables", table.id), {
+      status: "approved",
+    });
+    setTables(prev => prev.map(t => t.id === table.id ? { ...t, status: "approved" } as any : t));
+  } catch (err) {
+    console.error(err);
+    alert("Erreur lors de la validation de la table.");
+  } finally {
+    stopProcessing(table.id);
+  }
+}
+
+async function refuserTable(table: TableAnimee) {
+  if (processingIds.has(table.id)) return;
+  if (!confirm("Refuser cette table ?")) return;
+  startProcessing(table.id);
+  try {
+    await updateDoc(doc(db, "evenements", table.animationId, "tables", table.id), {
+      status: "rejected",
+    });
+    setTables(prev => prev.map(t => t.id === table.id ? { ...t, status: "rejected" } as any : t));
+  } catch (err) {
+    console.error(err);
+    alert("Erreur lors du refus de la table.");
+  } finally {
+    stopProcessing(table.id);
+  }
+}
+
+  async function chargerInscriptionsAnim() {
+    setLoadingInscAnim(true);
+    const evts = await getDocs(
+      query(collection(db, "evenements"), where("categorie", "==", "animations"))
+    );
+    const all: InscriptionAnimation[] = [];
+    for (const evt of evts.docs) {
+      const insSnap = await getDocs(collection(db, "evenements", evt.id, "inscriptions"));
+      insSnap.docs.forEach(d => {
+        all.push({ id: d.id, animationId: evt.id, ...d.data() } as InscriptionAnimation);
+      });
+    }
+    setInscriptionsAnim(all);
+    setLoadingInscAnim(false);
+  }
+
+  async function dupliquerAnimation(a: AnimationPubliee) {
+  if (processingIds.has(a.id)) return;
+  startProcessing(a.id);
+  try {
+    const nouvelleDate = ajouterJours(a.date, 7);
+    const idDoc = a.lieu
+      ? `${a.lieu}_${nouvelleDate}`
+      : `en-ligne_${nouvelleDate}_${Date.now()}`;
+
+    const docRef = doc(db, "evenements", idDoc);
+    const existant = await getDoc(docRef);
+    if (existant.exists()) {
+      alert(`Une animation existe déjà à ce lieu le ${nouvelleDate}.`);
+      return;
+    }
+
+    const data = nettoyerUndefined({
+      titre: a.titre,
+      description: a.description,
+      categorie: "animations",
+      date: nouvelleDate,
+      heure: a.heure,
+      duree: a.duree || "",
+      niveau: a.niveau,
+      places: a.places,
+      inscrits: 0,
+      systeme: a.systeme || "",
+      tags: a.tags || [],
+      image: a.image || "",
+      lieuType: a.lieuType || "presentiel",
+      lieu: a.lieu || "",
+      ville: a.ville || "",
+      adresse: a.adresse || "",
+      lieuDetail: a.lieuDetail || "",
+      mjId: a.mjId || null,
+      mjNom: a.mjNom || "",
+      recurrent: !!a.recurrenceId,
+      recurrenceId: a.recurrenceId || null,
+    });
+
+    await setDoc(docRef, data);
+
+    setAnimations(prev => [...prev, { id: idDoc, ...data } as AnimationPubliee]
+      .sort((x, y) => x.date.localeCompare(y.date)));
+  } catch (err) {
+    console.error(err);
+    alert("Erreur lors de la duplication de l'animation : " + (err as any)?.message);
+  } finally {
+    stopProcessing(a.id);
+  }
+}
+
+async function modifierOccurrence(animation: AnimationPubliee, nouvelleDate: string, nouvelleHeure: string) {
+  if (processingIds.has(animation.id)) return;
+  if (!nouvelleDate || !nouvelleHeure) {
+    alert("Merci de renseigner une date et une heure valides.");
+    return;
+  }
+
+  startProcessing(animation.id);
+  try {
+    // Si la date change, il faut migrer vers un nouvel ID déterministe
+    // ({lieu}_{date}), car l'ID actuel encode l'ancienne date.
+    const dateInchangee = nouvelleDate === animation.date;
+
+    if (dateInchangee) {
+      // Juste l'heure change : simple update sur le document existant.
+      await updateDoc(doc(db, "evenements", animation.id), {
+        heure: nouvelleHeure,
+      });
+      setAnimations(prev =>
+        prev.map(a => a.id === animation.id ? { ...a, heure: nouvelleHeure } : a)
+      );
+    } else {
+      // La date change : il faut un nouvel ID pour rester cohérent avec
+      // {lieu}_{date}, donc on crée le nouveau doc et on supprime l'ancien.
+      const nouvelId = animation.lieu
+        ? `${animation.lieu}_${nouvelleDate}`
+        : `en-ligne_${nouvelleDate}_${Date.now()}`;
+
+      if (nouvelId !== animation.id) {
+        const docExistant = await getDoc(doc(db, "evenements", nouvelId));
+        if (docExistant.exists()) {
+          alert(`Une animation existe déjà à ce lieu le ${nouvelleDate}.`);
+          stopProcessing(animation.id);
+          return;
+        }
+      }
+
+      const { id, ...donnees } = animation;
+      const nouvellesDonnees = { ...donnees, date: nouvelleDate, heure: nouvelleHeure };
+
+      await setDoc(doc(db, "evenements", nouvelId), nettoyerUndefined(nouvellesDonnees));
+      await deleteDoc(doc(db, "evenements", animation.id));
+
+      setAnimations(prev =>
+        prev
+          .filter(a => a.id !== animation.id)
+          .concat([{ id: nouvelId, ...nouvellesDonnees }])
+          .sort((a, b) => a.date.localeCompare(b.date))
+      );
+    }
+
+    setEditingOccurrence(null);
+  } catch (err) {
+    console.error(err);
+    alert("Erreur lors de la modification de l'occurrence.");
+  } finally {
+    stopProcessing(animation.id);
+  }
+}
 
   // ── Auth ──────────────────────────────────────────────────────────────────
 
@@ -656,6 +980,10 @@ const membresFiltres = membres.filter(u => {
       setCheckingAuth(false);
       chargerPropositions();
       chargerRessources();
+      chargerAnimations();
+      chargerTables();
+      chargerInscriptionsAnim();
+      chargerMJs();
       chargerPropositionsRessources();
       chargerComptesEnAttente();
       chargerMembres();
@@ -673,13 +1001,13 @@ const membresFiltres = membres.filter(u => {
   }
 
   async function chargerMembres() {
-  setLoadingMembres(true);
-  const snap = await getDocs(collection(db, "users"));
-  const tous = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Utilisateur[];
-  // On exclut les comptes encore en attente, déjà gérés dans l'onglet Comptes
-  setMembres(tous.filter(u => u.status !== "pending"));
-  setLoadingMembres(false);
-}
+    setLoadingMembres(true);
+    const snap = await getDocs(collection(db, "users"));
+    const tous = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Utilisateur[];
+    // On exclut les comptes encore en attente, déjà gérés dans l'onglet Comptes
+    setMembres(tous.filter(u => u.status !== "pending"));
+    setLoadingMembres(false);
+  }
 
   async function chargerRessources() {
     setLoadingRes(true);
@@ -702,6 +1030,29 @@ const membresFiltres = membres.filter(u => {
     );
     setPendingUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })) as PendingUser[]);
     setLoadingUsers(false);
+  }
+
+  async function chargerAnimations() {
+    setLoadingAnimations(true);
+    const snap = await getDocs(
+      query(collection(db, "evenements"), where("categorie", "==", "animations"))
+    );
+    const items = snap.docs.map(d => ({ id: d.id, ...d.data() })) as AnimationPubliee[];
+    items.sort((a, b) => a.date.localeCompare(b.date));
+    setAnimations(items);
+    setLoadingAnimations(false);
+  }
+
+  async function chargerMJs() {
+    const snap = await getDocs(
+      query(collection(db, "users"), where("role", "in", ["mj", "admin"]))
+    );
+    setMjs(
+      snap.docs.map(d => ({
+        id: d.id,
+        nom: `${d.data().prenom ?? ""} ${d.data().nom ?? ""}`.trim() || d.data().pseudo || "MJ",
+      }))
+    );
   }
 
   // ── Actions comptes ───────────────────────────────────────────────────────
@@ -735,7 +1086,7 @@ const membresFiltres = membres.filter(u => {
     }
   }
 
-  // ── Actions événements ────────────────────────────────────────────────────
+  // ── Actions événements (propositions soumises par les joueurs / MJ) ───────
 
   async function accepterEvenement(event: Proposition) {
     if (processingIds.has(event.id)) return; // évite le double-clic / double-soumission
@@ -796,6 +1147,116 @@ const membresFiltres = membres.filter(u => {
       stopProcessing(id);
     }
   }
+
+  // ── Actions animations (créées directement par l'admin) ───────────────────
+
+  async function creerAnimation(e: React.FormEvent) {
+  e.preventDefault();
+
+  const lieuRequis = formAnim.lieuType === "presentiel";
+  if (!formAnim.titre || !formAnim.date || !formAnim.heure || !formAnim.mjId || (lieuRequis && !formAnim.lieu)) {
+    setMessageAnim({
+      type: "err",
+      text: lieuRequis
+        ? "Merci de renseigner au moins le titre, la date, l'heure, le lieu et le MJ référent."
+        : "Merci de renseigner au moins le titre, la date, l'heure et le MJ référent.",
+    });
+    return;
+  }
+  setSubmittingAnim(true);
+  setMessageAnim(null);
+  try {
+    const tags = formAnim.tags.split(",").map(t => t.trim()).filter(Boolean);
+    const lieuInfo = formAnim.lieu ? LIEUX[formAnim.lieu] : undefined;
+
+    // ── Calcul des dates à créer ──────────────────────────────────────────
+    const dates: string[] = [formAnim.date];
+    if (formAnim.recurrence === "hebdomadaire") {
+      let courante = formAnim.date;
+      while (true) {
+        courante = ajouterJours(courante, 7);
+        if (!estDansLeMoisAVenir(courante)) break;
+        dates.push(courante);
+      }
+    }
+
+    const recurrenceId = formAnim.recurrence === "hebdomadaire"
+      ? `rec_${Date.now()}`
+      : undefined;
+
+    const nouvelles: AnimationPubliee[] = [];
+    const datesIgnorees: string[] = [];
+
+    for (const dateOcc of dates) {
+      // ── ID déterministe : {lieu}_{date}, ou {aleatoire}_{date} si en ligne ──
+      // Permet d'éviter les doublons (2 animations au même lieu le même
+      // jour) et de retrouver un document sans requête si on connaît déjà
+      // le lieu et la date.
+      const idDoc = formAnim.lieu
+        ? `${formAnim.lieu}_${dateOcc}`
+        : `en-ligne_${dateOcc}_${Date.now()}`;
+
+      const docRef = doc(db, "evenements", idDoc);
+      const existant = await getDoc(docRef);
+      if (existant.exists()) {
+        datesIgnorees.push(dateOcc);
+        continue; // évite d'écraser une animation déjà créée à ce lieu/cette date
+      }
+
+      const data = {
+        titre: formAnim.titre,
+        description: formAnim.description,
+        categorie: "animations",
+        date: dateOcc,
+        heure: formAnim.heure,
+        duree: formAnim.duree,
+        niveau: formAnim.niveau,
+        places: formAnim.places,
+        inscrits: 0,
+        systeme: formAnim.systeme,
+        tags,
+        image: formAnim.image,
+        lieuType: formAnim.lieuType,
+        lieu: formAnim.lieu || "",           // ← slug, ex: "3brasseurs"
+        ville: lieuInfo?.ville || "",
+        adresse: lieuInfo?.adresse || "",
+        lieuDetail: formAnim.lieuDetail,
+        mjId: formAnim.mjId || null,
+        mjNom: formAnim.mjNom,
+        recurrent: formAnim.recurrence === "hebdomadaire",
+        recurrenceId: recurrenceId || null,
+      };
+
+      await setDoc(docRef, nettoyerUndefined(data));
+
+      nouvelles.push({ id: idDoc, ...data } as AnimationPubliee);
+    }
+
+    setAnimations(prev =>
+      [...prev, ...nouvelles].sort((a, b) => a.date.localeCompare(b.date))
+    );
+
+    const texteIgnorees = datesIgnorees.length > 0
+      ? ` (${datesIgnorees.length} date${datesIgnorees.length > 1 ? "s" : ""} ignorée${datesIgnorees.length > 1 ? "s" : ""} car déjà existante${datesIgnorees.length > 1 ? "s" : ""} à ce lieu)`
+      : "";
+
+    setMessageAnim({
+      type: "ok",
+      text: dates.length > 1
+        ? `Animation créée : ${nouvelles.length} occurrence${nouvelles.length > 1 ? "s" : ""} générée${nouvelles.length > 1 ? "s" : ""}${texteIgnorees}.`
+        : nouvelles.length > 0
+          ? "Animation créée !"
+          : `Une animation existe déjà à ce lieu pour cette date.`,
+    });
+
+    if (nouvelles.length > 0) setFormAnim(FORM_ANIMATION_VIDE);
+  } catch (err) {
+    console.error(err);
+    setMessageAnim({ type: "err", text: "Erreur lors de la création de l'animation." });
+  } finally {
+    setSubmittingAnim(false);
+  }
+}
 
   // ── Actions ressources (ajout direct par l'admin) ─────────────────────────
 
@@ -900,18 +1361,39 @@ const membresFiltres = membres.filter(u => {
           {pendingUsers.length > 0 && <Badge>{pendingUsers.length}</Badge>}
         </Tab>
         <Tab
-  $active={onglet === "membres"}
-  onClick={() => setOnglet("membres")}
->
-  🧑‍🤝‍🧑 Membres
-  <Badge>{membres.length}</Badge>
-</Tab>
+          $active={onglet === "membres"}
+          onClick={() => setOnglet("membres")}
+        >
+          🧑‍🤝‍🧑 Membres
+          <Badge>{membres.length}</Badge>
+        </Tab>
         <Tab
           $active={onglet === "evenements"}
           onClick={() => setOnglet("evenements")}
         >
           📬 Événements
           {propositions.length > 0 && <Badge>{propositions.length}</Badge>}
+        </Tab>
+        <Tab
+          $active={onglet === "animations"}
+          onClick={() => setOnglet("animations")}
+        >
+          🎭 Animations
+        </Tab>
+        <Tab
+          $active={onglet === "tables"}
+          onClick={() => setOnglet("tables")}
+        >
+          🎲 Tables
+          {tables.filter(t => t.places > 0 && (t as any).statut === "pending").length > 0 && (
+            <Badge>{tables.filter(t => (t as any).statut === "pending").length}</Badge>
+          )}
+        </Tab>
+        <Tab
+          $active={onglet === "inscriptions-anim"}
+          onClick={() => setOnglet("inscriptions-anim")}
+        >
+          📋 Inscriptions animations
         </Tab>
         <Tab
           $active={onglet === "ressources"}
@@ -965,53 +1447,54 @@ const membresFiltres = membres.filter(u => {
         </Grid>
       )}
 
+      {/* ── Onglet Membres ── */}
       {onglet === "membres" && (
-  <Grid>
-    <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.5rem" }}>
-      <Input
-        placeholder="Rechercher un nom, pseudo ou email…"
-        value={rechercheMembre}
-        onChange={e => setRechercheMembre(e.target.value)}
-        style={{ flex: 1, minWidth: "200px" }}
-      />
-      <Select
-        value={filtreRole}
-        onChange={e => setFiltreRole(e.target.value as any)}
-        style={{ maxWidth: "160px" }}
-      >
-        <option value="tous">Tous ({membres.length})</option>
-        <option value="joueur">Joueurs ({nbJoueurs})</option>
-        <option value="mj">MJ ({nbMJ})</option>
-      </Select>
-    </div>
+        <Grid>
+          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.5rem" }}>
+            <Input
+              placeholder="Rechercher un nom, pseudo ou email…"
+              value={rechercheMembre}
+              onChange={e => setRechercheMembre(e.target.value)}
+              style={{ flex: 1, minWidth: "200px" }}
+            />
+            <Select
+              value={filtreRole}
+              onChange={e => setFiltreRole(e.target.value as any)}
+              style={{ maxWidth: "160px" }}
+            >
+              <option value="tous">Tous ({membres.length})</option>
+              <option value="joueur">Joueurs ({nbJoueurs})</option>
+              <option value="mj">MJ ({nbMJ})</option>
+            </Select>
+          </div>
 
-    {loadingMembres && <Loading>Chargement…</Loading>}
+          {loadingMembres && <Loading>Chargement…</Loading>}
 
-    {!loadingMembres && membresFiltres.length === 0 && (
-      <Empty>Aucun membre ne correspond à cette recherche.</Empty>
-    )}
+          {!loadingMembres && membresFiltres.length === 0 && (
+            <Empty>Aucun membre ne correspond à cette recherche.</Empty>
+          )}
 
-    {membresFiltres.map(u => (
-      <Card key={u.id}>
-        <CardHeader>
-          <CardTitle>
-            {u.prenom && u.nom ? `${u.prenom} ${u.nom}` : (u.pseudo || "Utilisateur")}
-          </CardTitle>
-        </CardHeader>
-        <CardBody>
-          <Description>{u.email}</Description>
-          <MetaRow>
-            <RolePill $mj={u.role === "mj"}>
-              {u.role === "mj" ? "🧙 MJ & Joueur" : "🎲 Joueur"}
-            </RolePill>
-          </MetaRow>
-        </CardBody>
-      </Card>
-    ))}
-  </Grid>
-)}
+          {membresFiltres.map(u => (
+            <Card key={u.id}>
+              <CardHeader>
+                <CardTitle>
+                  {u.prenom && u.nom ? `${u.prenom} ${u.nom}` : (u.pseudo || "Utilisateur")}
+                </CardTitle>
+              </CardHeader>
+              <CardBody>
+                <Description>{u.email}</Description>
+                <MetaRow>
+                  <RolePill $mj={u.role === "mj"}>
+                    {u.role === "mj" ? "🧙 MJ & Joueur" : "🎲 Joueur"}
+                  </RolePill>
+                </MetaRow>
+              </CardBody>
+            </Card>
+          ))}
+        </Grid>
+      )}
 
-      {/* ── Onglet Événements ── */}
+      {/* ── Onglet Événements (propositions des joueurs / MJ) ── */}
       {onglet === "evenements" && (
         <Grid>
           {loadingEvts && <Loading>Chargement…</Loading>}
@@ -1072,6 +1555,404 @@ const membresFiltres = membres.filter(u => {
                       {busy ? "⏳ …" : "❌ Refuser"}
                     </RejectBtn>
                   </Actions>
+                </CardBody>
+              </Card>
+            );
+          })}
+        </Grid>
+      )}
+
+      {/* ── Onglet Animations (création directe par l'admin) ── */}
+      {onglet === "animations" && (
+        <RessourcesLayout>
+          <FormCard>
+            <FormTitle>✚ Créer une animation</FormTitle>
+            <form onSubmit={creerAnimation}>
+              <Field>
+                <Label htmlFor="a-titre">Titre *</Label>
+                <Input
+                  id="a-titre"
+                  placeholder="Ex : Soirée découverte JDR"
+                  value={formAnim.titre}
+                  onChange={e => setFormAnim(f => ({ ...f, titre: e.target.value }))}
+                />
+              </Field>
+
+              <Field>
+                <Label htmlFor="a-desc">Description</Label>
+                <Input
+                  id="a-desc"
+                  placeholder="Pitch de la soirée"
+                  value={formAnim.description}
+                  onChange={e => setFormAnim(f => ({ ...f, description: e.target.value }))}
+                />
+              </Field>
+
+              <Field>
+                <Label htmlFor="a-date">Date *</Label>
+                <Input
+                  id="a-date"
+                  type="date"
+                  value={formAnim.date}
+                  onChange={e => setFormAnim(f => ({ ...f, date: e.target.value }))}
+                />
+              </Field>
+
+              <Field>
+                <Label htmlFor="a-heure">Heure de début *</Label>
+                <Input
+                  id="a-heure"
+                  type="time"
+                  value={formAnim.heure}
+                  onChange={e => setFormAnim(f => ({ ...f, heure: e.target.value }))}
+                />
+              </Field>
+
+              <Field>
+                <Label htmlFor="a-duree">Durée</Label>
+                <Input
+                  id="a-duree"
+                  placeholder="Ex : 3h"
+                  value={formAnim.duree}
+                  onChange={e => setFormAnim(f => ({ ...f, duree: e.target.value }))}
+                />
+              </Field>
+
+              <Field>
+                <Label htmlFor="a-lieuType">Type de lieu</Label>
+                <Select
+                  id="a-lieuType"
+                  value={formAnim.lieuType}
+                  onChange={e => setFormAnim(f => ({ ...f, lieuType: e.target.value as "presentiel" | "ligne" }))}
+                >
+                  <option value="presentiel">📍 Présentiel</option>
+                  <option value="ligne">💻 En ligne</option>
+                </Select>
+              </Field>
+
+              {formAnim.lieuType === "presentiel" ? (
+  <Field>
+    <Label htmlFor="a-lieu">Lieu *</Label>
+    <Select
+      id="a-lieu"
+      value={formAnim.lieu}
+      onChange={e => setFormAnim(f => ({ ...f, lieu: e.target.value }))}
+    >
+      <option value="">— Choisir un lieu —</option>
+      {Object.entries(LIEUX).map(([slug, info]) => (
+        <option key={slug} value={slug}>{info.label}</option>
+      ))}
+    </Select>
+  </Field>
+) : (
+  <Field>
+    <Label htmlFor="a-lieuDetail">Outil / lien</Label>
+    <Input
+      id="a-lieuDetail"
+      placeholder="Ex : Discord, Roll20…"
+      value={formAnim.lieuDetail}
+      onChange={e => setFormAnim(f => ({ ...f, lieuDetail: e.target.value }))}
+    />
+  </Field>
+)}
+
+              <Field>
+                <Label htmlFor="a-recurrence">Répétition</Label>
+                <Select
+                  id="a-recurrence"
+                  value={formAnim.recurrence}
+                  onChange={e => setFormAnim(f => ({ ...f, recurrence: e.target.value as "unique" | "hebdomadaire" }))}
+                >
+                  <option value="unique">Une seule fois</option>
+                  <option value="hebdomadaire">Toutes les semaines (sur le mois à venir)</option>
+                </Select>
+                <p style={{ fontSize: "0.72rem", color: "rgba(255,255,255,0.4)", marginTop: "0.3rem" }}>
+                  Si récurrente, une occurrence sera créée automatiquement chaque semaine au même jour, tant qu'elle tombe dans les 31 prochains jours.
+                </p>
+              </Field>
+
+              <Field>
+                <Label htmlFor="a-referent">MJ référent *</Label>
+                <Select
+                  id="a-referent"
+                  value={formAnim.mjId}
+                  onChange={e => {
+                    const id = e.target.value;
+                    const mj = mjs.find(m => m.id === id);
+                    setFormAnim(f => ({ ...f, mjId: id, mjNom: mj?.nom ?? "" }));
+                  }}
+                >
+                  <option value="">— Choisir un MJ référent —</option>
+                  {mjs.map(m => (
+                    <option key={m.id} value={m.id}>{m.nom}</option>
+                  ))}
+                </Select>
+              </Field>
+
+              <Field>
+                <Label htmlFor="a-image">URL de l'image</Label>
+                <Input
+                  id="a-image"
+                  type="url"
+                  placeholder="https://..."
+                  value={formAnim.image}
+                  onChange={e => setFormAnim(f => ({ ...f, image: e.target.value }))}
+                />
+              </Field>
+
+              <Field>
+                <Label htmlFor="a-tags">Tags (séparés par des virgules)</Label>
+                <Input
+                  id="a-tags"
+                  placeholder="découverte, one-shot, ambiance"
+                  value={formAnim.tags}
+                  onChange={e => setFormAnim(f => ({ ...f, tags: e.target.value }))}
+                />
+              </Field>
+
+              <Field>
+                <Label htmlFor="a-places">Places totales (toutes tables confondues)</Label>
+                <Input
+                  id="a-places"
+                  type="number"
+                  min={1}
+                  value={formAnim.places}
+                  onChange={e => setFormAnim(f => ({ ...f, places: Number(e.target.value) }))}
+                />
+                <p style={{ fontSize: "0.72rem", color: "rgba(255,255,255,0.4)", marginTop: "0.3rem" }}>
+                  Les MJs pourront ensuite proposer leurs tables (1 table = 1 sous-scénario).
+                </p>
+              </Field>
+
+              <SubmitBtn type="submit" disabled={submittingAnim}>
+                {submittingAnim ? "Création en cours…" : "Créer l'animation"}
+              </SubmitBtn>
+
+              {messageAnim?.type === "ok"  && <SuccessMsg>{messageAnim.text}</SuccessMsg>}
+              {messageAnim?.type === "err" && <ErrorMsg>{messageAnim.text}</ErrorMsg>}
+            </form>
+          </FormCard>
+
+          {/* Liste des animations déjà publiées, regroupées par série
+              récurrente : une carte par animation "unique" ou par série
+              hebdomadaire, avec les dates du mois à venir en badges. */}
+          <div>
+            <ListHeader>
+              <ListTitle>Animations publiées</ListTitle>
+              <ListCount>{animations.length} occurrence{animations.length > 1 ? "s" : ""}</ListCount>
+            </ListHeader>
+
+            {loadingAnimations && <Loading>Chargement…</Loading>}
+
+            {!loadingAnimations && animations.length === 0 && (
+              <Empty>Aucune animation publiée pour le moment.</Empty>
+            )}
+
+            {!loadingAnimations && (() => {
+              // Regroupement par recurrenceId (série hebdomadaire) ou par
+              // id propre (occurrence unique = son propre groupe).
+              const groupes = new Map<string, AnimationPubliee[]>();
+              animations.forEach(a => {
+                const cle = a.recurrenceId || a.id;
+                if (!groupes.has(cle)) groupes.set(cle, []);
+                groupes.get(cle)!.push(a);
+              });
+              const listeGroupes = Array.from(groupes.values())
+                .map(g => [...g].sort((x, y) => x.date.localeCompare(y.date)))
+                .sort((a, b) => a[0].date.localeCompare(b[0].date));
+
+              return listeGroupes.map(groupe => {
+                const premiere = groupe[0];
+                const busy = processingIds.has(premiere.id);
+                // On ne montre que les occurrences tombant dans le mois à
+                // venir, même si d'autres existent déjà en base plus loin.
+                const datesAVenir = groupe.filter(a => estDansLeMoisAVenir(a.date));
+
+                return (
+                  <RessourceItem
+                    key={premiere.recurrenceId || premiere.id}
+                    style={{ flexDirection: "column", alignItems: "stretch", gap: "0.6rem" }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.65rem" }}>
+                      <ItemInfo>
+                        <ItemTitre>
+                          {premiere.titre}
+                          {premiere.recurrenceId && (
+                            <span style={{ fontWeight: 400, color: "rgba(255,255,255,0.4)", fontSize: "0.75rem" }}>
+                              {" "}· hebdomadaire
+                            </span>
+                          )}
+                        </ItemTitre>
+                        <ItemMeta>
+                          {premiere.heure} · {premiere.ville || premiere.lieuDetail || "—"} · 👥 {premiere.inscrits}/{premiere.places}
+                        </ItemMeta>
+                      </ItemInfo>
+                      <TypePill>🧙 {premiere.mjNom}</TypePill>
+                      <DeleteBtn disabled={busy} onClick={() => dupliquerAnimation(premiere)}>
+                        {busy ? "…" : "🔁 +7j"}
+                      </DeleteBtn>
+                    </div>
+
+                    <MetaRow style={{ flexDirection: "column", alignItems: "stretch", gap: "0.5rem" }}>
+                      {datesAVenir.length === 0 && (
+                        <MetaBadge>Aucune date sur le mois à venir</MetaBadge>
+                      )}
+                      {datesAVenir.map(a => {
+                        const busyOcc = processingIds.has(a.id);
+                        const enEdition = editingOccurrence === a.id;
+
+                        if (enEdition) {
+                          return (
+                            <div key={a.id} style={{ display: "flex", gap: "0.4rem", alignItems: "center", flexWrap: "wrap" }}>
+                              <Input
+                                type="date"
+                                value={editDate}
+                                onChange={e => setEditDate(e.target.value)}
+                                style={{ maxWidth: "150px" }}
+                              />
+                              <Input
+                                type="time"
+                                value={editHeure}
+                                onChange={e => setEditHeure(e.target.value)}
+                                style={{ maxWidth: "110px" }}
+                              />
+                              <ValidateBtn
+                                disabled={busyOcc}
+                                onClick={() => modifierOccurrence(a, editDate, editHeure)}
+                                style={{ flex: "0 0 auto", padding: "0.4rem 0.8rem", minWidth: "auto" }}
+                              >
+                                {busyOcc ? "…" : "✅"}
+                              </ValidateBtn>
+                              <RejectBtn
+                                disabled={busyOcc}
+                                onClick={() => setEditingOccurrence(null)}
+                                style={{ flex: "0 0 auto", padding: "0.4rem 0.8rem", minWidth: "auto" }}
+                              >
+                                ✕
+                              </RejectBtn>
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <div key={a.id} style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                            <MetaBadge>
+                              📅 {a.date} · 🕒 {a.heure} · 👥 {a.inscrits}/{a.places}
+                            </MetaBadge>
+                            <DeleteBtn
+                              disabled={busyOcc}
+                              onClick={() => {
+                                setEditingOccurrence(a.id);
+                                setEditDate(a.date);
+                                setEditHeure(a.heure);
+                              }}
+                              style={{ borderColor: "rgba(160,120,255,0.3)", background: "rgba(120,80,255,0.07)", color: "#c8a8ff" }}
+                            >
+                              ✏️
+                            </DeleteBtn>
+                          </div>
+                        );
+                      })}
+                    </MetaRow>
+                  </RessourceItem>
+                );
+              });
+            })()}
+          </div>
+        </RessourcesLayout>
+      )}
+
+      {/* ── Onglet Inscriptions animations ── */}
+      {onglet === "inscriptions-anim" && (
+        <Grid>
+          {loadingInscAnim && <Loading>Chargement…</Loading>}
+
+          {!loadingInscAnim && inscriptionsAnim.length === 0 && (
+            <Empty>Aucun joueur ne s'est encore inscrit à une animation.</Empty>
+          )}
+
+          {inscriptionsAnim.map(i => {
+            const anim = animations.find(a => a.id === i.animationId);
+            const nom = i.prenom && i.nom ? `${i.prenom} ${i.nom}` : (i.pseudo || i.email);
+            return (
+              <Card key={i.id}>
+                <CardHeader>
+                  <CardTitle>
+                    🧑 {nom}
+                    {anim && (
+                      <span style={{ fontSize: "0.75rem", color: "rgba(255,255,255,0.5)", marginLeft: "0.5rem" }}>
+                        → « {anim.titre} »
+                      </span>
+                    )}
+                  </CardTitle>
+                </CardHeader>
+                <CardBody>
+                  <Description>{i.email}</Description>
+                  {anim && (
+                    <MetaRow>
+                      <MetaBadge>📅 {anim.date}</MetaBadge>
+                      <MetaBadge>🕒 {anim.heure}</MetaBadge>
+                      <MetaBadge>📍 {anim.ville || anim.lieuDetail || "—"}</MetaBadge>
+                    </MetaRow>
+                  )}
+                </CardBody>
+              </Card>
+            );
+          })}
+        </Grid>
+      )}
+
+         {/* ── Onglet Tables (proposées par les MJ sur les animations) ── */}
+      {onglet === "tables" && (
+        <Grid>
+          {loadingTables && <Loading>Chargement…</Loading>}
+
+          {!loadingTables && tables.length === 0 && (
+            <Empty>Aucune table n'a encore été proposée sur une animation.</Empty>
+          )}
+
+          {tables.map(t => {
+            const anim = animations.find(a => a.id === t.animationId);
+            const busy = processingIds.has(t.id);
+            const statut = t.status ?? "pending";
+
+            return (
+              <Card key={t.id}>
+                <CardHeader>
+                  <CardTitle>
+                    🎲 {t.titre || t.systeme || "Table sans titre"}
+                    {anim && (
+                      <span style={{ fontSize: "0.75rem", color: "rgba(255,255,255,0.5)", marginLeft: "0.5rem" }}>
+                        · animation « {anim.titre} »
+                      </span>
+                    )}
+                  </CardTitle>
+                </CardHeader>
+                <CardBody>
+                  <Description>{t.description || "Pas de description."}</Description>
+                  <MetaRow>
+                    <MetaBadge>🧙 MJ : {t.mjNom}</MetaBadge>
+                    <MetaBadge>🎯 {t.systeme || "Système non précisé"}</MetaBadge>
+                    <MetaBadge>👥 {t.inscrits}/{t.places}</MetaBadge>
+                    {anim && <MetaBadge>📅 {anim.date}</MetaBadge>}
+                    {t.heure && <MetaBadge>🕒 {t.heure}</MetaBadge>}
+                    <MetaBadge>
+                      {statut === "pending"  && "⏳ En attente"}
+                      {statut === "approved" && "✅ Validée"}
+                      {statut === "rejected" && "❌ Refusée"}
+                    </MetaBadge>
+                  </MetaRow>
+
+                  {statut === "pending" && (
+                    <Actions>
+                      <ValidateBtn disabled={busy} onClick={() => validerTable(t)}>
+                        {busy ? "⏳ …" : "✅ Valider"}
+                      </ValidateBtn>
+                      <RejectBtn disabled={busy} onClick={() => refuserTable(t)}>
+                        {busy ? "⏳ …" : "❌ Refuser"}
+                      </RejectBtn>
+                    </Actions>
+                  )}
                 </CardBody>
               </Card>
             );

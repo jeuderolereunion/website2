@@ -1,7 +1,8 @@
 "use client";
-
+import { useRouter } from "next/navigation";
 import styled, { keyframes } from "styled-components";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useState, useEffect, useRef } from "react";
 import { db, auth } from "@/lib/firebase";
 import { onAuthStateChanged, User } from "firebase/auth";
@@ -17,6 +18,7 @@ import {
   runTransaction,
   serverTimestamp,
   updateDoc,
+  deleteDoc,      // ← ajouté
   arrayUnion,
   arrayRemove,
 } from "firebase/firestore";
@@ -62,6 +64,19 @@ type EventDoc = {
   image?: string;
 };
 
+// Table proposée par un MJ pour une animation (sous-collection evenements/{id}/tables)
+type TableMJ = {
+  id: string;
+  mjId: string;
+  mjNom: string;
+  systeme: string;
+  description: string;
+  placesMax: number;
+  inscrits: number;
+  status: "pending" | "approved" | "rejected";
+  createdAt?: any;
+};
+
 type AdresseSuggestion = {
   label: string;
   context: string;
@@ -94,6 +109,22 @@ const CenterState = styled.div`
   gap: 1rem;
   padding: 6rem 1.5rem 2rem;
   text-align: center;
+`;
+
+const DeleteBtn = styled.button`
+  width: 100%;
+  padding: 0.55rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255,80,80,0.25);
+  background: transparent;
+  color: rgba(255,120,120,0.7);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  margin-bottom: 0.75rem;
+  transition: background 150ms, color 150ms;
+  &:hover:not(:disabled) { background: rgba(255,60,60,0.1); color: #ff8080; }
+  &:disabled { opacity: 0.5; cursor: not-allowed; }
 `;
 
 const StateTitle = styled.h1`font-size: 1.4rem; font-weight: 700;`;
@@ -228,6 +259,116 @@ const RuleItem = styled.li`
     margin-top: 0.2rem;
     flex-shrink: 0;
   }
+`;
+
+// ── Tables MJ (animations uniquement) ──────────────────────────────────────
+
+const TablesGrid = styled.div`
+  display: grid;
+  gap: 0.75rem;
+`;
+
+const TableCard = styled.div`
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+  padding: 1rem 1.1rem;
+`;
+
+const TableCardHeader = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+`;
+
+const TableMJLabel = styled.span`
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #c8a8ff;
+`;
+
+const TablePlacesBadge = styled.span<{ $full?: boolean }>`
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: ${p => p.$full ? "rgba(255,80,80,0.12)" : "rgba(120,80,255,0.15)"};
+  color: ${p => p.$full ? "#ff8080" : "rgba(200,180,255,0.9)"};
+  white-space: nowrap;
+`;
+
+const TableDesc = styled.p`
+  font-size: 0.82rem;
+  color: rgba(255,255,255,0.55);
+  line-height: 1.55;
+  margin: 0;
+`;
+
+const EmptyTables = styled.p`
+  font-size: 0.85rem;
+  color: rgba(255,255,255,0.35);
+  padding: 0.5rem 0;
+`;
+
+const ProposeTableBtn = styled.button`
+  padding: 0.55rem 1.1rem;
+  border-radius: 10px;
+  border: 1px dashed rgba(160,120,255,0.4);
+  background: rgba(120,80,255,0.08);
+  color: #c8a8ff;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 0.75rem;
+  transition: background 150ms, border-color 150ms;
+  &:hover { background: rgba(120,80,255,0.16); border-color: rgba(160,120,255,0.65); }
+  &:disabled { opacity: 0.5; cursor: not-allowed; }
+`;
+
+const JoinTableBtn = styled.button`
+  width: 100%;
+  padding: 0.5rem 1rem;
+  border-radius: 10px;
+  border: 1px solid rgba(160,120,255,0.4);
+  background: rgba(120,80,255,0.15);
+  color: #c8a8ff;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 0.75rem;
+  transition: background 150ms;
+  &:hover { background: rgba(120,80,255,0.28); }
+  &:disabled { opacity: 0.5; cursor: not-allowed; }
+`;
+
+const TableFormBox = styled.div`
+  margin-top: 0.9rem;
+  padding: 1rem;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.1);
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+`;
+
+const MyTableStatus = styled.div<{ $status: "pending" | "approved" | "rejected" }>`
+  margin-top: 0.75rem;
+  padding: 0.65rem 0.9rem;
+  border-radius: 10px;
+  font-size: 0.8rem;
+  background: ${p => p.$status === "approved" ? "rgba(80,200,120,0.1)" : p.$status === "rejected" ? "rgba(255,80,80,0.1)" : "rgba(255,180,60,0.1)"};
+  border: 1px solid ${p => p.$status === "approved" ? "rgba(80,200,120,0.3)" : p.$status === "rejected" ? "rgba(255,80,80,0.3)" : "rgba(255,180,60,0.3)"};
+  color: ${p => p.$status === "approved" ? "#7dffb3" : p.$status === "rejected" ? "#ff8080" : "#ffcf7d"};
+`;
+
+const MyRegistrationStatus = styled.div`
+  margin-top: 0.4rem;
+  font-size: 0.78rem;
+  color: #7dffb3;
+  font-weight: 600;
 `;
 
 // ── Galerie ───────────────────────────────────────────────────────────────────
@@ -908,10 +1049,10 @@ async function uploadToCloudinary(
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const CAT_LABELS: Record<string, string> = {
-  "soirees-jdr":  "🎲 Soirées JDR",
+  "soirees-jdr":  "🎲 Sessions JDR",
   "tournois":     "🏆 Tournois",
   "soirees-jeux": "🃏 Soirées Jeux",
-  "initiations":  "📖 Initiations",
+  "animations":  "📖 Animations",
 };
 
 function getInitiales(nom: string): string {
@@ -963,11 +1104,13 @@ function matchVille(cityFromApi: string): string | null {
 
 export default function EventDetailClient({ slug, id }: { slug: string; id: string }) {
   const [event, setEvent]       = useState<EventDoc | null>(null);
+  const searchParams = useSearchParams();
   const [loading, setLoading]   = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [mjNom, setMjNom]       = useState<string | null>(null);
-
+const router = useRouter();
+const [deletingEvent, setDeletingEvent] = useState(false);
   // Auth
   const [user, setUser]               = useState<User | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
@@ -976,6 +1119,9 @@ export default function EventDetailClient({ slug, id }: { slug: string; id: stri
 
   // Modal inscription
   const [selectedEvent, setSelectedEvent] = useState<EventDoc | null>(null);
+  // Table ciblée par l'inscription en cours — uniquement pour les animations.
+  // null = inscription générique à l'événement (événements classiques).
+  const [selectedTable, setSelectedTable] = useState<TableMJ | null>(null);
   const [submitting, setSubmitting]       = useState(false);
   const [success, setSuccess]             = useState(false);
   const [waitlisted, setWaitlisted]       = useState(false);
@@ -999,9 +1145,18 @@ export default function EventDetailClient({ slug, id }: { slug: string; id: stri
   const [saving, setSaving]       = useState(false);
 
   // Autocomplétion adresse
-  // Autocomplétion adresse
-const [adresseSuggestions, setAdresseSuggestions] = useState<AdresseSuggestion[]>([]);
-const adresseAbortRef = useRef<AbortController | null>(null);
+  const [adresseSuggestions, setAdresseSuggestions] = useState<AdresseSuggestion[]>([]);
+  const adresseAbortRef = useRef<AbortController | null>(null);
+
+  // Tables MJ (animations uniquement)
+  const [allTables, setAllTables]             = useState<TableMJ[]>([]);
+  const [loadingTables, setLoadingTables]     = useState(true);
+  const [tableFormOpen, setTableFormOpen]     = useState(false);
+  const [tableForm, setTableForm]             = useState({ systeme: "", description: "", placesMax: 4 });
+  const [submittingTable, setSubmittingTable] = useState(false);
+
+  // Table(s) auxquelles le joueur connecté est déjà inscrit sur cette animation
+  const [mesTablesInscrites, setMesTablesInscrites] = useState<Set<string>>(new Set());
 
   // ── Chargement événement ──────────────────────────────────────────────────
 
@@ -1037,6 +1192,59 @@ const adresseAbortRef = useRef<AbortController | null>(null);
     return () => { cancelled = true; };
   }, [event]);
 
+  // ── Chargement tables MJ (animations uniquement) ──────────────────────────
+
+  useEffect(() => {
+    if (!event || slug !== "animations") {
+      setLoadingTables(false);
+      return;
+    }
+    let cancelled = false;
+    setLoadingTables(true);
+    getDocs(collection(db, "evenements", event.id, "tables")).then(snap => {
+      if (cancelled) return;
+      setAllTables(snap.docs.map(d => ({ id: d.id, inscrits: 0, ...d.data() })) as TableMJ[]);
+      setLoadingTables(false);
+    }).catch(() => {
+      if (!cancelled) setLoadingTables(false);
+    });
+    return () => { cancelled = true; };
+  }, [event?.id, slug]);
+
+  // Charge les tables auxquelles le joueur connecté est déjà inscrit, pour
+  // désactiver/annoter les boutons "S'inscrire" en conséquence.
+  useEffect(() => {
+    if (!event || slug !== "animations" || !user) {
+      setMesTablesInscrites(new Set());
+      return;
+    }
+    let cancelled = false;
+    getDocs(
+      query(collection(db, "evenements", event.id, "inscriptions"), where("userId", "==", user.uid))
+    ).then(snap => {
+      if (cancelled) return;
+      const ids = snap.docs
+        .map(d => (d.data() as any).tableId as string | undefined)
+        .filter((v): v is string => !!v);
+      setMesTablesInscrites(new Set(ids));
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [event?.id, slug, user]);
+
+  const approvedTables = allTables.filter(t => t.status === "approved");
+  const myTable = user ? allTables.find(t => t.mjId === user.uid) ?? null : null;
+useEffect(() => {
+    if (
+      searchParams.get("action") === "proposer-table" &&
+      (userProfile?.role === "mj" || userProfile?.role === "admin") &&
+      !myTable &&
+      !authLoading
+    ) {
+      setTableFormOpen(true);
+      document.getElementById("section-tables")?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [searchParams, userProfile, myTable, authLoading]);
+  
   // ── Auth ──────────────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -1058,7 +1266,7 @@ const adresseAbortRef = useRef<AbortController | null>(null);
     return () => unsub();
   }, []);
 
-  // ── Inscription ───────────────────────────────────────────────────────────
+  // ── Inscription (événements classiques) ────────────────────────────────────
 
   function handleRegisterClick() {
     if (authLoading) return;
@@ -1067,6 +1275,19 @@ const adresseAbortRef = useRef<AbortController | null>(null);
       return;
     }
     if (event?.mjId && event.mjId === user.uid) return;
+    setSelectedTable(null);
+    setSelectedEvent(event);
+  }
+
+  // ── Inscription à une table précise (animations) ────────────────────────────
+
+  function handleJoinTableClick(table: TableMJ) {
+    if (authLoading) return;
+    if (!user) {
+      window.location.href = `/login?redirect=${encodeURIComponent(window.location.pathname)}`;
+      return;
+    }
+    setSelectedTable(table);
     setSelectedEvent(event);
   }
 
@@ -1074,6 +1295,61 @@ const adresseAbortRef = useRef<AbortController | null>(null);
     if (!selectedEvent || !user || !userProfile) return;
     setSubmitting(true);
     try {
+      // ── Animations : inscription à une table précise ──────────────────────
+      if (slug === "animations" && selectedTable) {
+        const dejaInscritQuery = query(
+          collection(db, "evenements", selectedEvent.id, "inscriptions"),
+          where("userId", "==", user.uid)
+        );
+        const dejaInscritSnap = await getDocs(dejaInscritQuery);
+        if (!dejaInscritSnap.empty) {
+          alert("Vous êtes déjà inscrit à une table pour cette animation.");
+          setSubmitting(false);
+          return;
+        }
+
+        const tableCourante = selectedTable;
+        const result: { statut: "confirme" | "attente" } = { statut: "confirme" };
+
+        await runTransaction(db, async (transaction) => {
+          const tableRef = doc(db, "evenements", selectedEvent.id, "tables", tableCourante.id);
+          const tableSnap = await transaction.get(tableRef);
+          if (!tableSnap.exists()) throw new Error("Cette table n'existe plus.");
+          const d = tableSnap.data();
+          const placesRestantes = (d.placesMax ?? 0) - (d.inscrits || 0);
+          if (placesRestantes > 0) {
+            result.statut = "confirme";
+            transaction.update(tableRef, { inscrits: increment(1) });
+          } else {
+            result.statut = "attente";
+          }
+        });
+
+        await addDoc(collection(db, "evenements", selectedEvent.id, "inscriptions"), {
+          userId:     user.uid,
+          tableId:    tableCourante.id,
+          tableMjNom: tableCourante.mjNom,
+          systeme:    tableCourante.systeme,
+          prenom:     userProfile.pseudo,
+          pseudo:     userProfile.pseudo,
+          email:      userProfile.email,
+          statut:     result.statut,
+          createdAt:  serverTimestamp(),
+        });
+
+        setAllTables(prev => prev.map(t =>
+          t.id === tableCourante.id && result.statut === "confirme"
+            ? { ...t, inscrits: (t.inscrits ?? 0) + 1 }
+            : t
+        ));
+        setMesTablesInscrites(prev => new Set(prev).add(tableCourante.id));
+
+        setWaitlisted(result.statut === "attente");
+        setSuccess(true);
+        return;
+      }
+
+      // ── Flux générique (événements classiques) ────────────────────────────
       const existingQuery = query(
         collection(db, "inscriptions"),
         where("eventId", "==", selectedEvent.id),
@@ -1136,7 +1412,47 @@ const adresseAbortRef = useRef<AbortController | null>(null);
     }
   }
 
-  function closeModal() { setSelectedEvent(null); setSuccess(false); setWaitlisted(false); }
+  function closeModal() {
+    setSelectedEvent(null);
+    setSelectedTable(null);
+    setSuccess(false);
+    setWaitlisted(false);
+  }
+
+  // ── Proposition de table MJ ────────────────────────────────────────────────
+
+  async function handleSubmitTable() {
+    if (!event || !user || !userProfile || myTable) return;
+    setSubmittingTable(true);
+    try {
+      const docRef = await addDoc(collection(db, "evenements", event.id, "tables"), {
+        mjId: user.uid,
+        mjNom: userProfile.pseudo || userProfile.email,
+        systeme: tableForm.systeme,
+        description: tableForm.description,
+        placesMax: Number(tableForm.placesMax) || 1,
+        inscrits: 0,
+        status: "pending",
+        createdAt: serverTimestamp(),
+      });
+      setAllTables(prev => [...prev, {
+        id: docRef.id,
+        mjId: user.uid,
+        mjNom: userProfile.pseudo || userProfile.email,
+        systeme: tableForm.systeme,
+        description: tableForm.description,
+        placesMax: Number(tableForm.placesMax) || 1,
+        inscrits: 0,
+        status: "pending",
+      }]);
+      setTableFormOpen(false);
+      setTableForm({ systeme: "", description: "", placesMax: 4 });
+    } catch (err: any) {
+      alert("Erreur lors de la proposition de table : " + err.message);
+    } finally {
+      setSubmittingTable(false);
+    }
+  }
 
   // ── Partage ───────────────────────────────────────────────────────────────
 
@@ -1309,6 +1625,52 @@ const adresseAbortRef = useRef<AbortController | null>(null);
     }
   }
 
+  async function handleDeleteEvent() {
+  if (!event) return;
+
+  const confirmMsg = estAnimation
+    ? "Supprimer cette animation ? Toutes les tables et inscriptions associées seront perdues. Cette action est irréversible."
+    : "Supprimer cet événement ? Toutes les inscriptions associées seront perdues. Cette action est irréversible.";
+
+  if (!window.confirm(confirmMsg)) return;
+
+  setDeletingEvent(true);
+  try {
+    // Supprime les photos de la galerie (Firebase Storage)
+    if (event.photos && event.photos.length > 0) {
+      const storage = getStorage();
+      await Promise.all(
+        event.photos.map(url =>
+          deleteObject(storageRef(storage, url)).catch(() => {})
+        )
+      );
+    }
+
+    // Supprime les inscriptions liées (collection racine "inscriptions")
+    const inscriptionsSnap = await getDocs(
+      query(collection(db, "inscriptions"), where("eventId", "==", event.id))
+    );
+    await Promise.all(inscriptionsSnap.docs.map(d => deleteDoc(d.ref)));
+
+    // Si c'est une animation : supprime les sous-collections tables + inscriptions
+    if (estAnimation) {
+      const tablesSnap = await getDocs(collection(db, "evenements", event.id, "tables"));
+      await Promise.all(tablesSnap.docs.map(d => deleteDoc(d.ref)));
+
+      const subInscriptionsSnap = await getDocs(collection(db, "evenements", event.id, "inscriptions"));
+      await Promise.all(subInscriptionsSnap.docs.map(d => deleteDoc(d.ref)));
+    }
+
+    // Supprime le document événement lui-même
+    await deleteDoc(doc(db, "evenements", event.id));
+
+    router.push(`/evenements/${slug}`);
+  } catch (err: any) {
+    alert("Erreur lors de la suppression : " + (err.message || "inconnue"));
+    setDeletingEvent(false);
+  }
+}
+
   // ── États de chargement / erreur ──────────────────────────────────────────
 
   if (loading) {
@@ -1340,6 +1702,7 @@ const adresseAbortRef = useRef<AbortController | null>(null);
   const placesDispo = event.places - (event.inscrits ?? 0);
   const complet     = placesDispo <= 0;
   const isOnline    = event.lieuType === "ligne";
+  const estAnimation = slug === "animations";
 
   // Adresse + ville combinées pour l'affichage et la carte
   const lieuAffiche =
@@ -1356,6 +1719,14 @@ const adresseAbortRef = useRef<AbortController | null>(null);
   const canEdit         = estOrganisateur || isAdmin;
   const canDeletePhoto  = isAdmin;
   const canUploadPhoto  = estOrganisateur || isAdmin;
+
+  // Pour l'inscription en cours (peut concerner une table précise)
+  const cibleModal = selectedTable
+    ? { places: selectedTable.placesMax, inscrits: selectedTable.inscrits ?? 0 }
+    : selectedEvent
+      ? { places: selectedEvent.places, inscrits: selectedEvent.inscrits ?? 0 }
+      : { places: 0, inscrits: 0 };
+  const cibleComplet = (cibleModal.places - cibleModal.inscrits) <= 0;
 
   return (
     <Page>
@@ -1391,6 +1762,106 @@ const adresseAbortRef = useRef<AbortController | null>(null);
             )}
             <Desc>{event.description}</Desc>
           </Section>
+
+          {/* Tables proposées par les MJ — animations uniquement */}
+          {estAnimation && (
+            <Section>
+              <SectionLabel>Tables proposées par les MJ</SectionLabel>
+
+              {loadingTables && <EmptyTables>Chargement des tables…</EmptyTables>}
+
+              {!loadingTables && approvedTables.length === 0 && (
+                <EmptyTables>Aucune table proposée pour le moment.</EmptyTables>
+              )}
+
+              {!loadingTables && approvedTables.length > 0 && (
+                <TablesGrid>
+                  {approvedTables.map(t => {
+                    const placesTableDispo = t.placesMax - (t.inscrits ?? 0);
+                    const tableComplete    = placesTableDispo <= 0;
+                    const dejaInscrit      = mesTablesInscrites.has(t.id);
+                    const estMJDeCetteTable = user?.uid === t.mjId;
+
+                    return (
+                      <TableCard key={t.id}>
+                        <TableCardHeader>
+                          <TableMJLabel>🧙 {t.mjNom}{t.systeme ? ` · ${t.systeme}` : ""}</TableMJLabel>
+                          <TablePlacesBadge $full={tableComplete}>
+                            {tableComplete ? "Complet" : `${placesTableDispo} place${placesTableDispo > 1 ? "s" : ""}`} / {t.placesMax}
+                          </TablePlacesBadge>
+                        </TableCardHeader>
+                        <TableDesc>{t.description}</TableDesc>
+
+                        {estMJDeCetteTable ? (
+                          <HintText>🎭 C'est votre table</HintText>
+                        ) : dejaInscrit ? (
+                          <MyRegistrationStatus>✅ Vous êtes inscrit à cette table</MyRegistrationStatus>
+                        ) : mesTablesInscrites.size > 0 ? (
+                          <HintText>Vous êtes déjà inscrit à une autre table de cette animation.</HintText>
+                        ) : (
+                          <JoinTableBtn onClick={() => handleJoinTableClick(t)}>
+                            {tableComplete ? "📋 Liste d'attente pour cette table" : "✋ S'inscrire à cette table"}
+                          </JoinTableBtn>
+                        )}
+                      </TableCard>
+                    );
+                  })}
+                </TablesGrid>
+              )}
+
+              {(userProfile?.role === "mj" || userProfile?.role === "admin")  && (
+                myTable ? (
+                  <MyTableStatus $status={myTable.status}>
+                    {myTable.status === "pending"  && "⏳ Votre table est en attente de validation par un admin."}
+                    {myTable.status === "approved" && "✅ Votre table est validée et visible ci-dessus."}
+                    {myTable.status === "rejected" && "❌ Votre proposition de table n'a pas été retenue."}
+                  </MyTableStatus>
+                ) : !tableFormOpen ? (
+                  <ProposeTableBtn onClick={() => setTableFormOpen(true)}>
+                    🎲 Proposer ma table pour cette animation
+                  </ProposeTableBtn>
+                ) : (
+                  <TableFormBox>
+                    <div>
+                      <Label>Système / jeu</Label>
+                      <Input
+                        value={tableForm.systeme}
+                        onChange={e => setTableForm(f => ({ ...f, systeme: e.target.value }))}
+                        placeholder="D&D 5e, Croc, Star Wars…"
+                      />
+                    </div>
+                    <div>
+                      <Label>Description de la table</Label>
+                      <Textarea
+                        value={tableForm.description}
+                        onChange={e => setTableForm(f => ({ ...f, description: e.target.value }))}
+                        rows={3}
+                        placeholder="Scénario, ton de la table, ce que les joueurs peuvent attendre…"
+                      />
+                    </div>
+                    <div>
+                      <Label>Nombre de places max</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        value={tableForm.placesMax}
+                        onChange={e => setTableForm(f => ({ ...f, placesMax: Number(e.target.value) }))}
+                      />
+                    </div>
+                    <ModalActions style={{ marginTop: 0 }}>
+                      <CancelBtn onClick={() => setTableFormOpen(false)}>Annuler</CancelBtn>
+                      <SaveBtn
+                        onClick={handleSubmitTable}
+                        disabled={submittingTable || !tableForm.systeme || !tableForm.description}
+                      >
+                        {submittingTable ? "Envoi…" : "Proposer la table"}
+                      </SaveBtn>
+                    </ModalActions>
+                  </TableFormBox>
+                )
+              )}
+            </Section>
+          )}
 
           {/* Règles */}
           {event.regles && event.regles.length > 0 && (
@@ -1479,7 +1950,7 @@ const adresseAbortRef = useRef<AbortController | null>(null);
           {/* Inscription */}
           <AsideCard>
             <PlacesRow>
-              <PlacesLabel>Places restantes</PlacesLabel>
+              <PlacesLabel>{estAnimation ? "Places restantes (toutes tables)" : "Places restantes"}</PlacesLabel>
               <PlacesBadge $full={complet}>
                 {complet ? "Complet" : `${placesDispo} / ${event.places}`}
               </PlacesBadge>
@@ -1497,15 +1968,28 @@ const adresseAbortRef = useRef<AbortController | null>(null);
                   </span>
                 )}
               </EditBtn>
+
             )}
 
-            <RegBtn $full={complet} disabled={estOrganisateur} onClick={handleRegisterClick}>
-              {estOrganisateur
-                ? "🎭 Vous organisez"
-                : complet
-                  ? "📋 Rejoindre la liste d'attente"
-                  : "S'inscrire à cette partie"}
-            </RegBtn>
+            {canEdit && (
+  <DeleteBtn onClick={handleDeleteEvent} disabled={deletingEvent}>
+    {deletingEvent ? "Suppression…" : "🗑️ Supprimer l'événement"}
+  </DeleteBtn>
+)}
+
+            {estAnimation ? (
+              <HintText style={{ margin: "0 0 0.75rem" }}>
+                👉 Choisissez une table dans la section « Tables proposées par les MJ » ci-contre pour vous inscrire.
+              </HintText>
+            ) : (
+              <RegBtn $full={complet} disabled={estOrganisateur} onClick={handleRegisterClick}>
+                {estOrganisateur
+                  ? "🎭 Vous organisez"
+                  : complet
+                    ? "📋 Rejoindre la liste d'attente"
+                    : "S'inscrire à cette partie"}
+              </RegBtn>
+            )}
             <ShareBtn onClick={handleShare}>↗ Partager</ShareBtn>
           </AsideCard>
 
@@ -1550,12 +2034,14 @@ const adresseAbortRef = useRef<AbortController | null>(null);
             {!success ? (
               <>
                 <ModalTitle>
-                  {(selectedEvent.places - (selectedEvent.inscrits ?? 0)) <= 0
+                  {cibleComplet
                     ? "Rejoindre la liste d'attente"
-                    : "S'inscrire"}
+                    : selectedTable ? "S'inscrire à cette table" : "S'inscrire"}
                 </ModalTitle>
                 <ModalSub>
-                  {formatDateFr(event.date)} · {event.heure}
+                  {selectedTable
+                    ? `${selectedTable.mjNom}${selectedTable.systeme ? ` · ${selectedTable.systeme}` : ""}`
+                    : `${formatDateFr(event.date)} · ${event.heure}`}
                 </ModalSub>
 
                 {userProfile && (
@@ -1569,9 +2055,9 @@ const adresseAbortRef = useRef<AbortController | null>(null);
                 )}
 
                 <p style={{ fontSize: "0.85rem", color: "rgba(255,255,255,0.45)", marginBottom: "1.5rem" }}>
-                  {(selectedEvent.places - (selectedEvent.inscrits ?? 0)) <= 0
-                    ? "Cet événement est complet. Vous serez ajouté à la liste d'attente et prévenu si une place se libère."
-                    : "Votre inscription sera enregistrée avec ce compte. Un email de confirmation vous sera envoyé."}
+                  {cibleComplet
+                    ? "Cette " + (selectedTable ? "table" : "session") + " est complète. Vous serez ajouté à la liste d'attente et prévenu si une place se libère."
+                    : "Votre inscription sera enregistrée avec ce compte."}
                 </p>
 
                 <ModalActions>
@@ -1590,8 +2076,10 @@ const adresseAbortRef = useRef<AbortController | null>(null);
                   <strong>{waitlisted ? "Vous êtes en liste d'attente !" : "Inscription confirmée !"}</strong>
                   <p style={{ color: "rgba(255,255,255,0.5)", fontSize: "0.85rem", marginTop: "0.5rem" }}>
                     {waitlisted
-                      ? "L'événement est complet. Vous serez prévenu si une place se libère."
-                      : <>Un email a été envoyé à <strong>{userProfile?.email}</strong>.</>}
+                      ? "La table est complète. Vous serez prévenu si une place se libère."
+                      : selectedTable
+                        ? "Votre place à cette table est confirmée."
+                        : <>Un email a été envoyé à <strong>{userProfile?.email}</strong>.</>}
                   </p>
                 </SuccessMsg>
                 <ModalActions>

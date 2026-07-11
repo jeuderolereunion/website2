@@ -128,8 +128,8 @@ const events = [
   },
   {
     icon: '📖',
-    title: 'Initiations',
-    slug: "initiations",
+    title: 'Animations',
+    slug: "animations",
     description: 'Ateliers pour découvrir le jeu de rôle de zéro. Un cadre bienveillant pour les nouveaux joueurs.',
   },
 ];
