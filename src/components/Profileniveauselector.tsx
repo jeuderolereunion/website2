@@ -135,7 +135,7 @@ const OPTIONS: { value: NiveauChoice; label: string; desc: string }[] = [
   { value: "expert", label: "🏆 Expert", desc: "Je pratique depuis longtemps" },
 ];
 
-export default function ProfileNiveauSelector({ uid, currentNiveau, onSaved }: Props) {
+export default function Profileniveauselector({ uid, currentNiveau, onSaved }: Props) {
   const [niveau, setNiveau] = useState<NiveauChoice | null>(currentNiveau ?? null);
   const [saving, setSaving] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
