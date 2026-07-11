@@ -6,7 +6,7 @@ import Link from "next/link";
 import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged, signOut, User } from "firebase/auth";
 import Navigation from "@/components/Navigation";
-import ProfileNiveauselector from "@/components/ProfileNiveauselector";
+import ProfileNiveauSelector from "@/components/ProfileNiveauSelector";
 import ContactOfficers from "@/components/ContactOfficers";
 import OfficerInbox from "@/components/OfficerInbox";
 import { subscribeToConversations, Conversation } from "@/lib/chat";
