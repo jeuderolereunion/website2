@@ -79,7 +79,7 @@ const EVENTS: EventSpot[] = [
     schedule: "Tous les mercredis soirs",
     tag: "Découverte",
     description: "...",
-    image: "/images/laKourcaferoliste.png",
+    image: "/images/LaKourcaferoliste.png",
     x: 54.7,
     y: 218.4,
   },
