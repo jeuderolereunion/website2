@@ -21,8 +21,18 @@ type EventDoc = {
   inscrits: number;
   lieu?: string;
   systeme?: string;
+  mjId?: string;   // ← ajouté : organisateur référent de l'animation
 };
-
+type InscriptionJoueur = {
+  id: string;
+  userId: string;
+  prenom?: string;
+  pseudo?: string;
+  email: string;
+  statut: "confirme" | "attente";
+  tableId?: string | null;
+  tableMjNom?: string | null;
+};
 type TableMJ = {
   id: string;
   mjId: string;
@@ -42,6 +52,59 @@ type UserProfile = { pseudo: string; email: string; role?: string };
 const fadeUp = keyframes`
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
+`;
+const ReferentPanel = styled.div`
+  margin-top: 1.1rem;
+  padding: 1rem 1.1rem;
+  border-radius: 12px;
+  background: rgba(160,120,255,0.05);
+  border: 1px solid rgba(160,120,255,0.25);
+`;
+
+const ReferentTitle = styled.p`
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(160,120,255,0.9);
+  margin: 0 0 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+`;
+
+const ReferentSubLabel = styled.p`
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: rgba(255,255,255,0.4);
+  margin: 0.9rem 0 0.5rem;
+  &:first-child { margin-top: 0; }
+`;
+
+const ReferentItem = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.07);
+  margin-bottom: 0.4rem;
+  font-size: 0.8rem;
+  color: rgba(255,255,255,0.8);
+`;
+
+const StatusPill = styled.span<{ $tone: "ok" | "warn" | "danger" }>`
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+  background: ${p => p.$tone === "ok" ? "rgba(80,200,120,0.15)" : p.$tone === "warn" ? "rgba(255,180,60,0.15)" : "rgba(255,80,80,0.15)"};
+  color: ${p => p.$tone === "ok" ? "#7dffb3" : p.$tone === "warn" ? "#ffcf7d" : "#ff8080"};
 `;
 
 const Page = styled.main`
@@ -570,6 +633,8 @@ export default function VenueEventsClient({
   lieu: string;
   venue: VenueInfo;
 }) {
+  const [inscriptionsParEvent, setInscriptionsParEvent] = useState<Record<string, InscriptionJoueur[]>>({});
+const [loadingInscriptions, setLoadingInscriptions] = useState<Record<string, boolean>>({});
   const [events, setEvents] = useState<EventDoc[]>([]);
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<User | null>(null);
@@ -632,41 +697,59 @@ export default function VenueEventsClient({
   }, [lieu, slug]);
 
   async function toggleExpand(eventId: string) {
-    if (expandedId === eventId) {
-      setExpandedId(null);
-      return;
-    }
-    setExpandedId(eventId);
+  if (expandedId === eventId) {
+    setExpandedId(null);
+    return;
+  }
+  setExpandedId(eventId);
 
-    if (!tablesParEvent[eventId]) {
-      setLoadingTables(prev => ({ ...prev, [eventId]: true }));
-      try {
-        const snap = await getDocs(collection(db, "evenements", eventId, "tables"));
-        const tables = snap.docs.map(d => ({ id: d.id, inscrits: 0, ...d.data() })) as TableMJ[];
-        setTablesParEvent(prev => ({ ...prev, [eventId]: tables }));
-      } catch {
-        setTablesParEvent(prev => ({ ...prev, [eventId]: [] }));
-      } finally {
-        setLoadingTables(prev => ({ ...prev, [eventId]: false }));
-      }
-    }
-
-    if (user && !(eventId in mesInscriptions)) {
-      try {
-        const snap = await getDocs(
-          query(collection(db, "evenements", eventId, "inscriptions"), where("userId", "==", user.uid))
-        );
-        if (!snap.empty) {
-          const d = snap.docs[0].data() as any;
-          setMesInscriptions(prev => ({ ...prev, [eventId]: { tableId: d.tableId } }));
-        } else {
-          setMesInscriptions(prev => ({ ...prev, [eventId]: null }));
-        }
-      } catch {
-        setMesInscriptions(prev => ({ ...prev, [eventId]: null }));
-      }
+  if (!tablesParEvent[eventId]) {
+    setLoadingTables(prev => ({ ...prev, [eventId]: true }));
+    try {
+      const snap = await getDocs(collection(db, "evenements", eventId, "tables"));
+      const tables = snap.docs.map(d => ({ id: d.id, inscrits: 0, ...d.data() })) as TableMJ[];
+      setTablesParEvent(prev => ({ ...prev, [eventId]: tables }));
+    } catch {
+      setTablesParEvent(prev => ({ ...prev, [eventId]: [] }));
+    } finally {
+      setLoadingTables(prev => ({ ...prev, [eventId]: false }));
     }
   }
+
+  if (user && !(eventId in mesInscriptions)) {
+    try {
+      const snap = await getDocs(
+        query(collection(db, "evenements", eventId, "inscriptions"), where("userId", "==", user.uid))
+      );
+      if (!snap.empty) {
+        const d = snap.docs[0].data() as any;
+        setMesInscriptions(prev => ({ ...prev, [eventId]: { tableId: d.tableId } }));
+      } else {
+        setMesInscriptions(prev => ({ ...prev, [eventId]: null }));
+      }
+    } catch {
+      setMesInscriptions(prev => ({ ...prev, [eventId]: null }));
+    }
+  }
+
+  // ── Suivi complet pour le MJ référent (organisateur) ou l'admin ──────────
+  const event = events.find(ev => ev.id === eventId);
+  const estReferent = !!user && !!event &&
+    (event.mjId === user.uid || userProfile?.role === "admin");
+
+  if (estReferent && !(eventId in inscriptionsParEvent)) {
+    setLoadingInscriptions(prev => ({ ...prev, [eventId]: true }));
+    try {
+      const snap = await getDocs(collection(db, "evenements", eventId, "inscriptions"));
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() })) as InscriptionJoueur[];
+      setInscriptionsParEvent(prev => ({ ...prev, [eventId]: list }));
+    } catch {
+      setInscriptionsParEvent(prev => ({ ...prev, [eventId]: [] }));
+    } finally {
+      setLoadingInscriptions(prev => ({ ...prev, [eventId]: false }));
+    }
+  }
+}
 
   function openRegisterModal(event: EventDoc, table: TableMJ | null) {
     if (authLoading) return;
@@ -881,6 +964,8 @@ export default function VenueEventsClient({
               <SectionTitle>{mois}</SectionTitle>
               <List>
                 {eventsDuMois.map(e => {
+                  const estReferent = !!user && (e.mjId === user.uid || userProfile?.role === "admin");
+const inscriptionsDeCetteDate = inscriptionsParEvent[e.id] ?? [];
                   const dispo = e.places - (e.inscrits ?? 0);
                   const level = getPlacesLevel(dispo);
                   const estProchaine = events[0].id === e.id;
@@ -1039,6 +1124,48 @@ export default function VenueEventsClient({
                               )}
                             </MjSection>
                           )}
+                          {estReferent && (
+  <ReferentPanel>
+    <ReferentTitle>👁️ Suivi de l&apos;animation (organisateur)</ReferentTitle>
+
+    <ReferentSubLabel>
+      Joueurs inscrits ({inscriptionsDeCetteDate.filter(i => i.statut === "confirme").length})
+    </ReferentSubLabel>
+    {loadingInscriptions[e.id] ? (
+      <NoTablesMsg>Chargement…</NoTablesMsg>
+    ) : inscriptionsDeCetteDate.length === 0 ? (
+      <NoTablesMsg>Aucune inscription pour le moment.</NoTablesMsg>
+    ) : (
+      inscriptionsDeCetteDate.map(i => (
+        <ReferentItem key={i.id}>
+          <span>
+            {i.pseudo || i.prenom || i.email}
+            {i.tableMjNom ? ` · table de ${i.tableMjNom}` : " · sans table précise"}
+          </span>
+          <StatusPill $tone={i.statut === "confirme" ? "ok" : "warn"}>
+            {i.statut === "confirme" ? "Confirmé" : "Liste d'attente"}
+          </StatusPill>
+        </ReferentItem>
+      ))
+    )}
+
+    <ReferentSubLabel>Tables proposées par les MJ ({tables.length})</ReferentSubLabel>
+    {tables.length === 0 ? (
+      <NoTablesMsg>Aucune table proposée pour le moment.</NoTablesMsg>
+    ) : (
+      tables.map(t => (
+        <ReferentItem key={t.id}>
+          <span>
+            🧙 {t.mjNom}{t.systeme ? ` · ${t.systeme}` : ""} · {t.inscrits}/{t.placesMax} places
+          </span>
+          <StatusPill $tone={t.status === "approved" ? "ok" : t.status === "rejected" ? "danger" : "warn"}>
+            {t.status === "approved" ? "Validée" : t.status === "rejected" ? "Refusée" : "En attente"}
+          </StatusPill>
+        </ReferentItem>
+      ))
+    )}
+  </ReferentPanel>
+)}
                         </ExpandedZone>
                       )}
                     </EventCard>
