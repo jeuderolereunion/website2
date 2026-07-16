@@ -17,6 +17,10 @@ const AboutContainer = styled(Container)`
   scroll-snap-align: none;
   padding-top: 4rem;
   padding-bottom: 4rem;
+
+  @media (max-width: 480px) {
+    padding-bottom: 3rem;
+  }
 `;
 
 const CardThumbnail = styled.div<{ $src: string }>`
@@ -144,7 +148,7 @@ const MapLayout = styled.div`
   @media (max-width: 860px) {
     grid-template-columns: minmax(0, 1fr);
     justify-items: stretch;
-    gap: 1.25rem;
+    gap: 1rem;
   }
 `;
 
@@ -154,12 +158,12 @@ const MapWrapper = styled.div`
   max-width: 480px;
 
   @media (max-width: 860px) {
-    max-width: 420px;
+    max-width: 320px;
     margin: 0 auto;
   }
 
   @media (max-width: 480px) {
-    max-width: 100%;
+    max-width: 260px;
   }
 `;
 
@@ -200,8 +204,10 @@ const Pin = styled.g<{ $active: boolean }>`
     pointer-events: none;
   }
 
-  &:hover circle.dot {
-    fill: #ffffff;
+  @media (hover: hover) and (pointer: fine) {
+    &:hover circle.dot {
+      fill: #ffffff;
+    }
   }
 
   &:focus-visible {
@@ -223,8 +229,7 @@ const EventGrid = styled.div`
 
 // Card redevenue un simple bouton (toggle de la FloatingCard). La
 // navigation se fait uniquement via le bouton "S'inscrire" à l'intérieur.
-const EventCard = styled.button<{ $active: boolean }>`
-  all: unset;
+const EventCard = styled.div<{ $active: boolean }>`
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -238,24 +243,26 @@ const EventCard = styled.button<{ $active: boolean }>`
   transition: border-color 0.2s ease, background 0.2s ease, transform 0.15s ease;
   width: 100%;
   box-sizing: border-box;
+  overflow: hidden;
 
-  &:hover {
-    border-color: rgba(255, 255, 255, 0.4);
-    background: rgba(255, 255, 255, 0.06);
-    transform: translateY(-1px);
+  @media (hover: hover) and (pointer: fine) {
+    &:hover {
+      border-color: rgba(255, 255, 255, 0.4);
+      background: rgba(255, 255, 255, 0.06);
+      transform: translateY(-1px);
+    }
   }
 
   &:focus-visible {
+    outline: none;
     border-color: rgba(255, 255, 255, 0.6);
     background: rgba(255, 255, 255, 0.08);
   }
 
-  @media (hover: none) {
-    &:hover { transform: none; }
-  }
-
-  @media (max-width: 860px) {
-    padding: 0.75rem 0.9rem;
+  @media (max-width: 480px) {
+    flex-wrap: wrap;
+    padding: 0.75rem 0.85rem;
+    row-gap: 0.6rem;
   }
 `;
 
@@ -265,7 +272,11 @@ const CardMain = styled.div`
   gap: 0.75rem;
   min-width: 0;
   overflow: hidden;
-  flex: 1;
+  flex: 1 1 auto;
+
+  @media (max-width: 480px) {
+    flex: 1 1 100%;
+  }
 `;
 
 const CardTextCol = styled.div`
@@ -273,6 +284,7 @@ const CardTextCol = styled.div`
   flex-direction: column;
   gap: 0.2rem;
   min-width: 0;
+  flex: 1;
 `;
 
 const CardNameRow = styled.div`
@@ -280,6 +292,10 @@ const CardNameRow = styled.div`
   align-items: baseline;
   gap: 0.5rem;
   min-width: 0;
+
+  @media (max-width: 480px) {
+    flex-wrap: wrap;
+  }
 `;
 
 const ScheduleRow = styled.span`
@@ -316,9 +332,10 @@ const CardRight = styled.div`
   flex-shrink: 0;
 
   @media (max-width: 480px) {
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 0.35rem;
+    flex: 1 1 100%;
+    justify-content: space-between;
+    flex-direction: row;
+    align-items: center;
   }
 `;
 
@@ -351,9 +368,11 @@ const RegisterLink = styled(Link)`
   flex-shrink: 0;
   transition: background 0.2s ease, transform 0.15s ease;
 
-  &:hover {
-    background: #ffffff;
-    transform: translateY(-1px);
+  @media (hover: hover) and (pointer: fine) {
+    &:hover {
+      background: #ffffff;
+      transform: translateY(-1px);
+    }
   }
 
   &:focus-visible {
@@ -590,8 +609,9 @@ export default function About() {
   {EVENTS.map((event) => (
     <EventCard
       key={event.id}
-      type="button"
       $active={activeId === event.id}
+      role="button"
+      tabIndex={0}
       onMouseEnter={() => {
         setActiveId(event.id);
         setHoveredId(event.id);
@@ -600,6 +620,13 @@ export default function About() {
       onClick={() => {
         setActiveId(event.id);
         setHoveredId((current) => (current === event.id ? null : event.id));
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          setActiveId(event.id);
+          setHoveredId((current) => (current === event.id ? null : event.id));
+        }
       }}
       aria-pressed={activeId === event.id}
     >
