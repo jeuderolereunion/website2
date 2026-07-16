@@ -550,6 +550,74 @@ const TypePill = styled.span`
   flex-shrink: 0;
 `;
 
+const EditGroupBox = styled.div`
+  margin-top: 0.75rem;
+  padding: 1rem;
+  border-radius: 12px;
+  background: rgba(120,80,255,0.05);
+  border: 1px solid rgba(160,120,255,0.25);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+`;
+
+const ImagePreviewWrap = styled.div`
+  position: relative;
+  width: 100%;
+  max-width: 220px;
+  aspect-ratio: 16 / 9;
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(255,255,255,0.05);
+  border: 0.5px solid rgba(255,255,255,0.1);
+`;
+
+const ImagePreviewImg = styled.img`
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+`;
+
+const UploadLabel = styled.label`
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.9rem;
+  border-radius: 8px;
+  border: 1px dashed rgba(160,120,255,0.4);
+  background: rgba(120,80,255,0.08);
+  color: #c8a8ff;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  width: fit-content;
+  &:hover { background: rgba(120,80,255,0.16); }
+`;
+
+const HiddenFileInput = styled.input`
+  display: none;
+`;
+
+const UploadProgressBar = styled.div<{ $pct: number }>`
+  width: 100%;
+  max-width: 220px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.08);
+  overflow: hidden;
+  position: relative;
+  margin-top: 0.4rem;
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    width: ${p => p.$pct ?? 0}%;
+    background: linear-gradient(90deg, #7c4dff, #c8a8ff);
+    transition: width 150ms;
+  }
+`;
+
 const RolePill = styled.span<{ $mj?: boolean }>`
   font-size: 0.7rem;
   padding: 3px 8px;
@@ -702,7 +770,16 @@ const [editHeure, setEditHeure] = useState("");
   // ── État événements ────────────────────────────────────────────────────────
   const [propositions, setPropositions] = useState<Proposition[]>([]);
   const [loadingEvts, setLoadingEvts] = useState(true);
+  const [formAnimUploadPct, setFormAnimUploadPct] = useState<number | null>(null);
 
+const [editingGroupKey, setEditingGroupKey] = useState<string | null>(null);
+const [editGroupForm, setEditGroupForm] = useState<{
+  places: number;
+  image: string;
+  recurrence: "unique" | "hebdomadaire";
+}>({ places: 6, image: "", recurrence: "unique" });
+const [editGroupUploadPct, setEditGroupUploadPct] = useState<number | null>(null);
+const [savingGroup, setSavingGroup] = useState(false);
   const [tables, setTables] = useState<TableAnimee[]>([]);
   const [loadingTables, setLoadingTables] = useState(true);
   const [inscriptionsAnim, setInscriptionsAnim] = useState<InscriptionAnimation[]>([]);
@@ -958,6 +1035,168 @@ async function modifierOccurrence(animation: AnimationPubliee, nouvelleDate: str
     alert("Erreur lors de la modification de l'occurrence.");
   } finally {
     stopProcessing(animation.id);
+  }
+}
+
+function ouvrirEditionGroupe(groupe: AnimationPubliee[]) {
+  const premiere = groupe[0];
+  const cle = premiere.recurrenceId || premiere.id;
+  setEditingGroupKey(cle);
+  setEditGroupForm({
+    places: premiere.places,
+    image: premiere.image || "",
+    recurrence: premiere.recurrenceId ? "hebdomadaire" : "unique",
+  });
+}
+
+function fermerEditionGroupe() {
+  setEditingGroupKey(null);
+  setEditGroupUploadPct(null);
+}
+
+async function handleEditGroupImageChange(e: React.ChangeEvent<HTMLInputElement>) {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  setEditGroupUploadPct(0);
+  try {
+    const url = await uploadToCloudinary(file, setEditGroupUploadPct);
+    setEditGroupForm(f => ({ ...f, image: url }));
+  } catch (err: any) {
+    alert("Erreur lors de l'upload de l'image : " + (err.message || "inconnue"));
+  } finally {
+    setEditGroupUploadPct(null);
+  }
+}
+
+async function enregistrerModifGroupe(groupe: AnimationPubliee[]) {
+  const premiere = groupe[0];
+  const cle = premiere.recurrenceId || premiere.id;
+  if (processingIds.has(cle)) return;
+  startProcessing(cle);
+  setSavingGroup(true);
+  try {
+    const etaitRecurrent = !!premiere.recurrenceId;
+    const doitEtreRecurrent = editGroupForm.recurrence === "hebdomadaire";
+
+    // ── Cas 1 : la récurrence ne change pas → simple mise à jour des places
+    // et de l'image sur toutes les occurrences déjà existantes de la série ──
+    if (etaitRecurrent === doitEtreRecurrent) {
+      const idsAMettreAJour = etaitRecurrent
+        ? (await getDocs(
+            query(collection(db, "evenements"), where("recurrenceId", "==", premiere.recurrenceId))
+          )).docs.map(d => d.id)
+        : [premiere.id];
+
+      await Promise.all(
+        idsAMettreAJour.map(id =>
+          updateDoc(doc(db, "evenements", id), {
+            places: editGroupForm.places,
+            image: editGroupForm.image || "",
+          })
+        )
+      );
+
+      setAnimations(prev => prev.map(a =>
+        idsAMettreAJour.includes(a.id)
+          ? { ...a, places: editGroupForm.places, image: editGroupForm.image }
+          : a
+      ));
+    }
+
+    // ── Cas 2 : passage de "unique" à "hebdomadaire" → on garde l'occurrence
+    // existante et on génère les dates suivantes sur le mois à venir ────────
+    else if (!etaitRecurrent && doitEtreRecurrent) {
+      const nouveauRecurrenceId = `rec_${Date.now()}`;
+      await updateDoc(doc(db, "evenements", premiere.id), {
+        places: editGroupForm.places,
+        image: editGroupForm.image || "",
+        recurrent: true,
+        recurrenceId: nouveauRecurrenceId,
+      });
+
+      const nouvelles: AnimationPubliee[] = [];
+      let courante = premiere.date;
+      while (true) {
+        courante = ajouterJours(courante, 7);
+        if (!estDansLeMoisAVenir(courante)) break;
+
+        const idDoc = premiere.lieu
+          ? `${premiere.lieu}_${courante}`
+          : `en-ligne_${courante}_${Date.now()}`;
+        const existant = await getDoc(doc(db, "evenements", idDoc));
+        if (existant.exists()) continue;
+
+        const data = nettoyerUndefined({
+          titre: premiere.titre,
+          description: premiere.description,
+          categorie: "animations",
+          date: courante,
+          heure: premiere.heure,
+          duree: premiere.duree || "",
+          niveau: premiere.niveau,
+          places: editGroupForm.places,
+          inscrits: 0,
+          systeme: premiere.systeme || "",
+          tags: premiere.tags || [],
+          image: editGroupForm.image || "",
+          lieuType: premiere.lieuType || "presentiel",
+          lieu: premiere.lieu || "",
+          ville: premiere.ville || "",
+          adresse: premiere.adresse || "",
+          lieuDetail: premiere.lieuDetail || "",
+          mjId: premiere.mjId || null,
+          mjNom: premiere.mjNom || "",
+          recurrent: true,
+          recurrenceId: nouveauRecurrenceId,
+        });
+        await setDoc(doc(db, "evenements", idDoc), data);
+        nouvelles.push({ id: idDoc, ...data } as AnimationPubliee);
+      }
+
+      setAnimations(prev =>
+        [
+          ...prev.map(a => a.id === premiere.id
+            ? { ...a, places: editGroupForm.places, image: editGroupForm.image, recurrent: true, recurrenceId: nouveauRecurrenceId }
+            : a),
+          ...nouvelles,
+        ].sort((a, b) => a.date.localeCompare(b.date))
+      );
+    }
+
+    // ── Cas 3 : passage de "hebdomadaire" à "unique" → on ne garde que la
+    // première occurrence, on supprime les autres dates de la série ────────
+    else {
+      const confirmation = confirm(
+        "Repasser cette série en « une seule fois » supprimera toutes les autres dates déjà générées. Continuer ?"
+      );
+      if (!confirmation) { setSavingGroup(false); stopProcessing(cle); return; }
+
+      const autresOccurrences = groupe.filter(a => a.id !== premiere.id);
+      await Promise.all(autresOccurrences.map(a => deleteDoc(doc(db, "evenements", a.id))));
+
+      await updateDoc(doc(db, "evenements", premiere.id), {
+        places: editGroupForm.places,
+        image: editGroupForm.image || "",
+        recurrent: false,
+        recurrenceId: null,
+      });
+
+      setAnimations(prev =>
+        prev
+          .filter(a => !autresOccurrences.some(o => o.id === a.id))
+          .map(a => a.id === premiere.id
+            ? { ...a, places: editGroupForm.places, image: editGroupForm.image, recurrent: false, recurrenceId: undefined }
+            : a)
+      );
+    }
+
+    setEditingGroupKey(null);
+  } catch (err: any) {
+    console.error(err);
+    alert("Erreur lors de la modification : " + (err.message || "inconnue"));
+  } finally {
+    setSavingGroup(false);
+    stopProcessing(cle);
   }
 }
 
@@ -1256,6 +1495,43 @@ async function modifierOccurrence(animation: AnimationPubliee, nouvelleDate: str
   } finally {
     setSubmittingAnim(false);
   }
+}
+
+const CLOUDINARY_CLOUD_NAME    = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME!;
+const CLOUDINARY_UPLOAD_PRESET = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET!;
+
+async function uploadToCloudinary(
+  file: File,
+  onProgress: (pct: number) => void
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`);
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const data = JSON.parse(xhr.responseText);
+          resolve(data.secure_url as string);
+        } catch (err) {
+          reject(err);
+        }
+      } else {
+        reject(new Error(`Échec de l'upload Cloudinary (${xhr.status})`));
+      }
+    };
+    xhr.onerror = () => reject(new Error("Échec de l'upload Cloudinary"));
+
+    xhr.send(formData);
+  });
 }
 
   // ── Actions ressources (ajout direct par l'admin) ─────────────────────────
@@ -1690,15 +1966,35 @@ async function modifierOccurrence(animation: AnimationPubliee, nouvelleDate: str
               </Field>
 
               <Field>
-                <Label htmlFor="a-image">URL de l'image</Label>
-                <Input
-                  id="a-image"
-                  type="url"
-                  placeholder="https://..."
-                  value={formAnim.image}
-                  onChange={e => setFormAnim(f => ({ ...f, image: e.target.value }))}
-                />
-              </Field>
+  <Label htmlFor="a-image">Image de l'animation</Label>
+  {formAnim.image && (
+    <ImagePreviewWrap>
+      <ImagePreviewImg src={formAnim.image} alt="Aperçu" />
+    </ImagePreviewWrap>
+  )}
+  <UploadLabel htmlFor="a-image-upload" style={{ marginTop: formAnim.image ? "0.5rem" : 0 }}>
+    🖼️ {formAnim.image ? "Changer l'image" : "Téléverser une image"}
+    <HiddenFileInput
+      id="a-image-upload"
+      type="file"
+      accept="image/*"
+      onChange={async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        setFormAnimUploadPct(0);
+        try {
+          const url = await uploadToCloudinary(file, setFormAnimUploadPct);
+          setFormAnim(f => ({ ...f, image: url }));
+        } catch (err: any) {
+          alert("Erreur lors de l'upload : " + (err.message || "inconnue"));
+        } finally {
+          setFormAnimUploadPct(null);
+        }
+      }}
+    />
+  </UploadLabel>
+  {formAnimUploadPct !== null && <UploadProgressBar $pct={formAnimUploadPct} />}
+</Field>
 
               <Field>
                 <Label htmlFor="a-tags">Tags (séparés par des virgules)</Label>
@@ -1791,6 +2087,13 @@ async function modifierOccurrence(animation: AnimationPubliee, nouvelleDate: str
                       <DeleteBtn disabled={busy} onClick={() => dupliquerAnimation(premiere)}>
                         {busy ? "…" : "🔁 +7j"}
                       </DeleteBtn>
+                      <DeleteBtn
+  disabled={busy}
+  onClick={() => ouvrirEditionGroupe(groupe)}
+  style={{ borderColor: "rgba(160,120,255,0.3)", background: "rgba(120,80,255,0.07)", color: "#c8a8ff" }}
+>
+  ✏️ Modifier
+</DeleteBtn>
                     </div>
 
                     <MetaRow style={{ flexDirection: "column", alignItems: "stretch", gap: "0.5rem" }}>
@@ -1854,6 +2157,64 @@ async function modifierOccurrence(animation: AnimationPubliee, nouvelleDate: str
                         );
                       })}
                     </MetaRow>
+                    {editingGroupKey === (premiere.recurrenceId || premiere.id) && (
+  <EditGroupBox>
+    <div>
+      <Label>Places totales</Label>
+      <Input
+        type="number"
+        min={1}
+        value={editGroupForm.places}
+        onChange={e => setEditGroupForm(f => ({ ...f, places: Number(e.target.value) }))}
+      />
+    </div>
+
+    <div>
+      <Label>Image de l&apos;animation</Label>
+      {editGroupForm.image && (
+        <ImagePreviewWrap>
+          <ImagePreviewImg src={editGroupForm.image} alt="Aperçu" />
+        </ImagePreviewWrap>
+      )}
+      <UploadLabel
+        htmlFor={`edit-image-${premiere.recurrenceId || premiere.id}`}
+        style={{ marginTop: editGroupForm.image ? "0.5rem" : 0 }}
+      >
+        🖼️ {editGroupForm.image ? "Changer l'image" : "Téléverser une image"}
+        <HiddenFileInput
+          id={`edit-image-${premiere.recurrenceId || premiere.id}`}
+          type="file"
+          accept="image/*"
+          onChange={handleEditGroupImageChange}
+        />
+      </UploadLabel>
+      {editGroupUploadPct !== null && <UploadProgressBar $pct={editGroupUploadPct} />}
+    </div>
+
+    <div>
+      <Label>Répétition</Label>
+      <Select
+        value={editGroupForm.recurrence}
+        onChange={e => setEditGroupForm(f => ({ ...f, recurrence: e.target.value as "unique" | "hebdomadaire" }))}
+      >
+        <option value="unique">Une seule fois</option>
+        <option value="hebdomadaire">Toutes les semaines (sur le mois à venir)</option>
+      </Select>
+      <p style={{ fontSize: "0.7rem", color: "rgba(255,255,255,0.4)", marginTop: "0.3rem" }}>
+        ⚠️ Passer de « hebdomadaire » à « une seule fois » supprime les autres dates déjà générées.
+      </p>
+    </div>
+
+    <Actions style={{ marginTop: 0 }}>
+      <RejectBtn onClick={fermerEditionGroupe} disabled={savingGroup}>
+        Annuler
+      </RejectBtn>
+      <ValidateBtn onClick={() => enregistrerModifGroupe(groupe)} disabled={savingGroup}>
+        {savingGroup ? "Enregistrement…" : "Enregistrer"}
+      </ValidateBtn>
+    </Actions>
+  </EditGroupBox>
+)}
                   </RessourceItem>
                 );
               });
