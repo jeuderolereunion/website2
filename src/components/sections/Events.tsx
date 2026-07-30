@@ -71,10 +71,10 @@ const Card = styled(Link)`
   }
 `;
 
-const CardImage = styled.div`
+const CardImage = styled.div<{ $image: string }>`
   position: absolute;
   inset: 0;
-  background-image: url(${(props) => props.$image});
+  background-image: url(${({ $image }) => $image});
   background-size: cover;
   background-position: center;
   opacity: 0;
