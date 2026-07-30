@@ -550,17 +550,6 @@ const TypePill = styled.span`
   flex-shrink: 0;
 `;
 
-const EditGroupBox = styled.div`
-  margin-top: 0.75rem;
-  padding: 1rem;
-  border-radius: 12px;
-  background: rgba(120,80,255,0.05);
-  border: 1px solid rgba(160,120,255,0.25);
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-`;
-
 const ImagePreviewWrap = styled.div`
   position: relative;
   width: 100%;
@@ -705,6 +694,99 @@ const PropositionHeader = styled.div`
   flex-wrap: wrap;
 `;
 
+// ── Modale d'édition d'une animation / série ───────────────────────────────
+
+const ModalOverlay = styled.div`
+  position: fixed;
+  inset: 0;
+  background: rgba(5,5,10,0.7);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 2rem 1rem;
+  z-index: 100;
+  overflow-y: auto;
+`;
+
+const ModalContent = styled.div`
+  background: #14121f;
+  border: 1px solid rgba(160,120,255,0.25);
+  border-radius: 18px;
+  width: 100%;
+  max-width: 560px;
+  margin: auto 0;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 4rem);
+`;
+
+const ModalHeader = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  flex-shrink: 0;
+`;
+
+const ModalCloseBtn = styled.button`
+  background: rgba(255,255,255,0.06);
+  border: none;
+  color: rgba(255,255,255,0.6);
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.15s;
+  flex-shrink: 0;
+
+  &:hover { background: rgba(255,255,255,0.12); color: white; }
+`;
+
+const ModalBody = styled.div`
+  padding: 1.5rem;
+  overflow-y: auto;
+`;
+
+const ModalFooter = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1.1rem 1.5rem;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+`;
+
+const FieldRow = styled.div`
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.9rem;
+
+  @media (max-width: 420px) {
+    grid-template-columns: 1fr;
+  }
+`;
+
+const DangerBtn = styled.button`
+  padding: 0.7rem 1rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255,80,80,0.25);
+  background: rgba(255,80,80,0.08);
+  color: #ff7b7b;
+  font-weight: 600;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+
+  &:hover:not(:disabled) { background: rgba(255,80,80,0.18); }
+  &:disabled { opacity: 0.5; cursor: not-allowed; }
+`;
+
 type AnimationPubliee = {
   id: string;
   titre: string;
@@ -772,12 +854,40 @@ const [editHeure, setEditHeure] = useState("");
   const [loadingEvts, setLoadingEvts] = useState(true);
   const [formAnimUploadPct, setFormAnimUploadPct] = useState<number | null>(null);
 
-const [editingGroupKey, setEditingGroupKey] = useState<string | null>(null);
+const [editingGroupe, setEditingGroupe] = useState<AnimationPubliee[] | null>(null);
 const [editGroupForm, setEditGroupForm] = useState<{
+  titre: string;
+  description: string;
+  heure: string;
+  duree: string;
+  niveau: string;
+  systeme: string;
+  tags: string;
   places: number;
   image: string;
+  lieuType: "presentiel" | "ligne";
+  lieu: string;
+  lieuDetail: string;
+  mjId: string;
+  mjNom: string;
   recurrence: "unique" | "hebdomadaire";
-}>({ places: 6, image: "", recurrence: "unique" });
+}>({
+  titre: "",
+  description: "",
+  heure: "20:00",
+  duree: "",
+  niveau: "Tous niveaux",
+  systeme: "",
+  tags: "",
+  places: 6,
+  image: "",
+  lieuType: "presentiel",
+  lieu: "",
+  lieuDetail: "",
+  mjId: "",
+  mjNom: "",
+  recurrence: "unique",
+});
 const [editGroupUploadPct, setEditGroupUploadPct] = useState<number | null>(null);
 const [savingGroup, setSavingGroup] = useState(false);
   const [tables, setTables] = useState<TableAnimee[]>([]);
@@ -1040,17 +1150,28 @@ async function modifierOccurrence(animation: AnimationPubliee, nouvelleDate: str
 
 function ouvrirEditionGroupe(groupe: AnimationPubliee[]) {
   const premiere = groupe[0];
-  const cle = premiere.recurrenceId || premiere.id;
-  setEditingGroupKey(cle);
+  setEditingGroupe(groupe);
   setEditGroupForm({
+    titre: premiere.titre,
+    description: premiere.description || "",
+    heure: premiere.heure,
+    duree: premiere.duree || "",
+    niveau: premiere.niveau,
+    systeme: premiere.systeme || "",
+    tags: (premiere.tags || []).join(", "),
     places: premiere.places,
     image: premiere.image || "",
+    lieuType: premiere.lieuType || "presentiel",
+    lieu: premiere.lieu || "",
+    lieuDetail: premiere.lieuDetail || "",
+    mjId: premiere.mjId || "",
+    mjNom: premiere.mjNom || "",
     recurrence: premiere.recurrenceId ? "hebdomadaire" : "unique",
   });
 }
 
 function fermerEditionGroupe() {
-  setEditingGroupKey(null);
+  setEditingGroupe(null);
   setEditGroupUploadPct(null);
 }
 
@@ -1068,18 +1189,49 @@ async function handleEditGroupImageChange(e: React.ChangeEvent<HTMLInputElement>
   }
 }
 
-async function enregistrerModifGroupe(groupe: AnimationPubliee[]) {
+async function enregistrerModifGroupe() {
+  if (!editingGroupe) return;
+  const groupe = editingGroupe;
   const premiere = groupe[0];
   const cle = premiere.recurrenceId || premiere.id;
   if (processingIds.has(cle)) return;
+
+  if (editGroupForm.lieuType === "presentiel" && !editGroupForm.lieu) {
+    alert("Merci de choisir un lieu.");
+    return;
+  }
+
   startProcessing(cle);
   setSavingGroup(true);
   try {
     const etaitRecurrent = !!premiere.recurrenceId;
     const doitEtreRecurrent = editGroupForm.recurrence === "hebdomadaire";
+    const lieuInfo = editGroupForm.lieu ? LIEUX[editGroupForm.lieu] : undefined;
+    const tags = editGroupForm.tags.split(",").map(t => t.trim()).filter(Boolean);
 
-    // ── Cas 1 : la récurrence ne change pas → simple mise à jour des places
-    // et de l'image sur toutes les occurrences déjà existantes de la série ──
+    // Champs communs à toutes les occurrences de la série (tout sauf la
+    // date, qui reste propre à chaque occurrence).
+    const champsCommuns = {
+      titre: editGroupForm.titre,
+      description: editGroupForm.description,
+      heure: editGroupForm.heure,
+      duree: editGroupForm.duree,
+      niveau: editGroupForm.niveau,
+      systeme: editGroupForm.systeme,
+      tags,
+      places: editGroupForm.places,
+      image: editGroupForm.image || "",
+      lieuType: editGroupForm.lieuType,
+      lieu: editGroupForm.lieu || "",
+      ville: lieuInfo?.ville || "",
+      adresse: lieuInfo?.adresse || "",
+      lieuDetail: editGroupForm.lieuDetail || "",
+      mjId: editGroupForm.mjId || null,
+      mjNom: editGroupForm.mjNom || "",
+    };
+
+    // ── Cas 1 : la récurrence ne change pas → mise à jour de tous les
+    // champs sur toutes les occurrences déjà existantes de la série ───────
     if (etaitRecurrent === doitEtreRecurrent) {
       const idsAMettreAJour = etaitRecurrent
         ? (await getDocs(
@@ -1089,17 +1241,12 @@ async function enregistrerModifGroupe(groupe: AnimationPubliee[]) {
 
       await Promise.all(
         idsAMettreAJour.map(id =>
-          updateDoc(doc(db, "evenements", id), {
-            places: editGroupForm.places,
-            image: editGroupForm.image || "",
-          })
+          updateDoc(doc(db, "evenements", id), nettoyerUndefined(champsCommuns))
         )
       );
 
       setAnimations(prev => prev.map(a =>
-        idsAMettreAJour.includes(a.id)
-          ? { ...a, places: editGroupForm.places, image: editGroupForm.image }
-          : a
+        idsAMettreAJour.includes(a.id) ? ({ ...a, ...champsCommuns } as AnimationPubliee) : a
       ));
     }
 
@@ -1107,12 +1254,11 @@ async function enregistrerModifGroupe(groupe: AnimationPubliee[]) {
     // existante et on génère les dates suivantes sur le mois à venir ────────
     else if (!etaitRecurrent && doitEtreRecurrent) {
       const nouveauRecurrenceId = `rec_${Date.now()}`;
-      await updateDoc(doc(db, "evenements", premiere.id), {
-        places: editGroupForm.places,
-        image: editGroupForm.image || "",
+      await updateDoc(doc(db, "evenements", premiere.id), nettoyerUndefined({
+        ...champsCommuns,
         recurrent: true,
         recurrenceId: nouveauRecurrenceId,
-      });
+      }));
 
       const nouvelles: AnimationPubliee[] = [];
       let courante = premiere.date;
@@ -1120,32 +1266,17 @@ async function enregistrerModifGroupe(groupe: AnimationPubliee[]) {
         courante = ajouterJours(courante, 7);
         if (!estDansLeMoisAVenir(courante)) break;
 
-        const idDoc = premiere.lieu
-          ? `${premiere.lieu}_${courante}`
+        const idDoc = editGroupForm.lieu
+          ? `${editGroupForm.lieu}_${courante}`
           : `en-ligne_${courante}_${Date.now()}`;
         const existant = await getDoc(doc(db, "evenements", idDoc));
         if (existant.exists()) continue;
 
         const data = nettoyerUndefined({
-          titre: premiere.titre,
-          description: premiere.description,
+          ...champsCommuns,
           categorie: "animations",
           date: courante,
-          heure: premiere.heure,
-          duree: premiere.duree || "",
-          niveau: premiere.niveau,
-          places: editGroupForm.places,
           inscrits: 0,
-          systeme: premiere.systeme || "",
-          tags: premiere.tags || [],
-          image: editGroupForm.image || "",
-          lieuType: premiere.lieuType || "presentiel",
-          lieu: premiere.lieu || "",
-          ville: premiere.ville || "",
-          adresse: premiere.adresse || "",
-          lieuDetail: premiere.lieuDetail || "",
-          mjId: premiere.mjId || null,
-          mjNom: premiere.mjNom || "",
           recurrent: true,
           recurrenceId: nouveauRecurrenceId,
         });
@@ -1156,7 +1287,7 @@ async function enregistrerModifGroupe(groupe: AnimationPubliee[]) {
       setAnimations(prev =>
         [
           ...prev.map(a => a.id === premiere.id
-            ? { ...a, places: editGroupForm.places, image: editGroupForm.image, recurrent: true, recurrenceId: nouveauRecurrenceId }
+            ? ({ ...a, ...champsCommuns, recurrent: true, recurrenceId: nouveauRecurrenceId } as AnimationPubliee)
             : a),
           ...nouvelles,
         ].sort((a, b) => a.date.localeCompare(b.date))
@@ -1174,28 +1305,59 @@ async function enregistrerModifGroupe(groupe: AnimationPubliee[]) {
       const autresOccurrences = groupe.filter(a => a.id !== premiere.id);
       await Promise.all(autresOccurrences.map(a => deleteDoc(doc(db, "evenements", a.id))));
 
-      await updateDoc(doc(db, "evenements", premiere.id), {
-        places: editGroupForm.places,
-        image: editGroupForm.image || "",
+      await updateDoc(doc(db, "evenements", premiere.id), nettoyerUndefined({
+        ...champsCommuns,
         recurrent: false,
         recurrenceId: null,
-      });
+      }));
 
       setAnimations(prev =>
         prev
           .filter(a => !autresOccurrences.some(o => o.id === a.id))
           .map(a => a.id === premiere.id
-            ? { ...a, places: editGroupForm.places, image: editGroupForm.image, recurrent: false, recurrenceId: undefined }
+            ? ({ ...a, ...champsCommuns, recurrent: false, recurrenceId: undefined } as AnimationPubliee)
             : a)
       );
     }
 
-    setEditingGroupKey(null);
+    setEditingGroupe(null);
   } catch (err: any) {
     console.error(err);
     alert("Erreur lors de la modification : " + (err.message || "inconnue"));
   } finally {
     setSavingGroup(false);
+    stopProcessing(cle);
+  }
+}
+
+// Supprime définitivement une animation (ou toute une série récurrente
+// avec l'ensemble de ses occurrences déjà générées en base).
+async function annulerAnimation(groupe: AnimationPubliee[]) {
+  const premiere = groupe[0];
+  const cle = premiere.recurrenceId || premiere.id;
+  if (processingIds.has(cle)) return;
+
+  const nb = groupe.length;
+  const confirmation = confirm(
+    premiere.recurrenceId
+      ? `Supprimer définitivement cette série récurrente et ses ${nb} occurrence${nb > 1 ? "s" : ""} ? Cette action est irréversible.`
+      : "Supprimer définitivement cette animation ? Cette action est irréversible."
+  );
+  if (!confirmation) return;
+
+  startProcessing(cle);
+  try {
+    await Promise.all(groupe.map(a => deleteDoc(doc(db, "evenements", a.id))));
+    setAnimations(prev => prev.filter(a => !groupe.some(g => g.id === a.id)));
+    setEditingGroupe(curr => {
+      if (!curr) return curr;
+      const curCle = curr[0].recurrenceId || curr[0].id;
+      return curCle === cle ? null : curr;
+    });
+  } catch (err) {
+    console.error(err);
+    alert("Erreur lors de la suppression de l'animation.");
+  } finally {
     stopProcessing(cle);
   }
 }
@@ -2094,6 +2256,9 @@ async function uploadToCloudinary(
 >
   ✏️ Modifier
 </DeleteBtn>
+                      <DeleteBtn disabled={busy} onClick={() => annulerAnimation(groupe)}>
+                        {busy ? "…" : "🗑️ Supprimer"}
+                      </DeleteBtn>
                     </div>
 
                     <MetaRow style={{ flexDirection: "column", alignItems: "stretch", gap: "0.5rem" }}>
@@ -2157,64 +2322,6 @@ async function uploadToCloudinary(
                         );
                       })}
                     </MetaRow>
-                    {editingGroupKey === (premiere.recurrenceId || premiere.id) && (
-  <EditGroupBox>
-    <div>
-      <Label>Places totales</Label>
-      <Input
-        type="number"
-        min={1}
-        value={editGroupForm.places}
-        onChange={e => setEditGroupForm(f => ({ ...f, places: Number(e.target.value) }))}
-      />
-    </div>
-
-    <div>
-      <Label>Image de l&apos;animation</Label>
-      {editGroupForm.image && (
-        <ImagePreviewWrap>
-          <ImagePreviewImg src={editGroupForm.image} alt="Aperçu" />
-        </ImagePreviewWrap>
-      )}
-      <UploadLabel
-        htmlFor={`edit-image-${premiere.recurrenceId || premiere.id}`}
-        style={{ marginTop: editGroupForm.image ? "0.5rem" : 0 }}
-      >
-        🖼️ {editGroupForm.image ? "Changer l'image" : "Téléverser une image"}
-        <HiddenFileInput
-          id={`edit-image-${premiere.recurrenceId || premiere.id}`}
-          type="file"
-          accept="image/*"
-          onChange={handleEditGroupImageChange}
-        />
-      </UploadLabel>
-      {editGroupUploadPct !== null && <UploadProgressBar $pct={editGroupUploadPct} />}
-    </div>
-
-    <div>
-      <Label>Répétition</Label>
-      <Select
-        value={editGroupForm.recurrence}
-        onChange={e => setEditGroupForm(f => ({ ...f, recurrence: e.target.value as "unique" | "hebdomadaire" }))}
-      >
-        <option value="unique">Une seule fois</option>
-        <option value="hebdomadaire">Toutes les semaines (sur le mois à venir)</option>
-      </Select>
-      <p style={{ fontSize: "0.7rem", color: "rgba(255,255,255,0.4)", marginTop: "0.3rem" }}>
-        ⚠️ Passer de « hebdomadaire » à « une seule fois » supprime les autres dates déjà générées.
-      </p>
-    </div>
-
-    <Actions style={{ marginTop: 0 }}>
-      <RejectBtn onClick={fermerEditionGroupe} disabled={savingGroup}>
-        Annuler
-      </RejectBtn>
-      <ValidateBtn onClick={() => enregistrerModifGroupe(groupe)} disabled={savingGroup}>
-        {savingGroup ? "Enregistrement…" : "Enregistrer"}
-      </ValidateBtn>
-    </Actions>
-  </EditGroupBox>
-)}
                   </RessourceItem>
                 );
               });
@@ -2222,6 +2329,203 @@ async function uploadToCloudinary(
           </div>
         </RessourcesLayout>
       )}
+
+      {/* ── Modale d'édition complète d'une animation / série ── */}
+      {editingGroupe && (() => {
+        const premiere = editingGroupe[0];
+        const cleGroupe = premiere.recurrenceId || premiere.id;
+        const busyGroupe = processingIds.has(cleGroupe);
+        return (
+          <ModalOverlay onClick={(e) => { if (e.target === e.currentTarget) fermerEditionGroupe(); }}>
+            <ModalContent>
+              <ModalHeader>
+                <FormTitle style={{ marginBottom: 0, paddingBottom: 0, border: "none" }}>
+                  ✏️ Modifier {premiere.recurrenceId ? "la série" : "l'animation"}
+                </FormTitle>
+                <ModalCloseBtn onClick={fermerEditionGroupe} aria-label="Fermer">✕</ModalCloseBtn>
+              </ModalHeader>
+
+              <ModalBody>
+                <Field>
+                  <Label>Titre *</Label>
+                  <Input
+                    value={editGroupForm.titre}
+                    onChange={e => setEditGroupForm(f => ({ ...f, titre: e.target.value }))}
+                  />
+                </Field>
+
+                <Field>
+                  <Label>Description</Label>
+                  <Input
+                    value={editGroupForm.description}
+                    onChange={e => setEditGroupForm(f => ({ ...f, description: e.target.value }))}
+                  />
+                </Field>
+
+                <FieldRow>
+                  <Field>
+                    <Label>Heure</Label>
+                    <Input
+                      type="time"
+                      value={editGroupForm.heure}
+                      onChange={e => setEditGroupForm(f => ({ ...f, heure: e.target.value }))}
+                    />
+                  </Field>
+                  <Field>
+                    <Label>Durée</Label>
+                    <Input
+                      value={editGroupForm.duree}
+                      onChange={e => setEditGroupForm(f => ({ ...f, duree: e.target.value }))}
+                    />
+                  </Field>
+                </FieldRow>
+
+                <FieldRow>
+                  <Field>
+                    <Label>Niveau</Label>
+                    <Input
+                      value={editGroupForm.niveau}
+                      onChange={e => setEditGroupForm(f => ({ ...f, niveau: e.target.value }))}
+                    />
+                  </Field>
+                  <Field>
+                    <Label>Système</Label>
+                    <Input
+                      value={editGroupForm.systeme}
+                      onChange={e => setEditGroupForm(f => ({ ...f, systeme: e.target.value }))}
+                    />
+                  </Field>
+                </FieldRow>
+
+                <Field>
+                  <Label>Tags (séparés par des virgules)</Label>
+                  <Input
+                    value={editGroupForm.tags}
+                    onChange={e => setEditGroupForm(f => ({ ...f, tags: e.target.value }))}
+                  />
+                </Field>
+
+                <Field>
+                  <Label>Type de lieu</Label>
+                  <Select
+                    value={editGroupForm.lieuType}
+                    onChange={e => setEditGroupForm(f => ({ ...f, lieuType: e.target.value as "presentiel" | "ligne" }))}
+                  >
+                    <option value="presentiel">📍 Présentiel</option>
+                    <option value="ligne">💻 En ligne</option>
+                  </Select>
+                </Field>
+
+                {editGroupForm.lieuType === "presentiel" ? (
+                  <Field>
+                    <Label>Lieu *</Label>
+                    <Select
+                      value={editGroupForm.lieu}
+                      onChange={e => setEditGroupForm(f => ({ ...f, lieu: e.target.value }))}
+                    >
+                      <option value="">— Choisir un lieu —</option>
+                      {Object.entries(LIEUX).map(([slug, info]) => (
+                        <option key={slug} value={slug}>{info.label}</option>
+                      ))}
+                    </Select>
+                  </Field>
+                ) : (
+                  <Field>
+                    <Label>Outil / lien</Label>
+                    <Input
+                      placeholder="Ex : Discord, Roll20…"
+                      value={editGroupForm.lieuDetail}
+                      onChange={e => setEditGroupForm(f => ({ ...f, lieuDetail: e.target.value }))}
+                    />
+                  </Field>
+                )}
+
+                <Field>
+                  <Label>MJ référent</Label>
+                  <Select
+                    value={editGroupForm.mjId}
+                    onChange={e => {
+                      const id = e.target.value;
+                      const mj = mjs.find(m => m.id === id);
+                      setEditGroupForm(f => ({ ...f, mjId: id, mjNom: mj?.nom ?? f.mjNom }));
+                    }}
+                  >
+                    <option value="">— Choisir un MJ référent —</option>
+                    {mjs.map(m => (
+                      <option key={m.id} value={m.id}>{m.nom}</option>
+                    ))}
+                  </Select>
+                </Field>
+
+                <Field>
+                  <Label>Places totales</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={editGroupForm.places}
+                    onChange={e => setEditGroupForm(f => ({ ...f, places: Number(e.target.value) }))}
+                  />
+                </Field>
+
+                <Field>
+                  <Label>Image de l&apos;animation</Label>
+                  {editGroupForm.image && (
+                    <ImagePreviewWrap>
+                      <ImagePreviewImg src={editGroupForm.image} alt="Aperçu" />
+                    </ImagePreviewWrap>
+                  )}
+                  <UploadLabel
+                    htmlFor="edit-modal-image"
+                    style={{ marginTop: editGroupForm.image ? "0.5rem" : 0 }}
+                  >
+                    🖼️ {editGroupForm.image ? "Changer l'image" : "Téléverser une image"}
+                    <HiddenFileInput
+                      id="edit-modal-image"
+                      type="file"
+                      accept="image/*"
+                      onChange={handleEditGroupImageChange}
+                    />
+                  </UploadLabel>
+                  {editGroupUploadPct !== null && <UploadProgressBar $pct={editGroupUploadPct} />}
+                </Field>
+
+                <Field>
+                  <Label>Répétition</Label>
+                  <Select
+                    value={editGroupForm.recurrence}
+                    onChange={e => setEditGroupForm(f => ({ ...f, recurrence: e.target.value as "unique" | "hebdomadaire" }))}
+                  >
+                    <option value="unique">Une seule fois</option>
+                    <option value="hebdomadaire">Toutes les semaines (sur le mois à venir)</option>
+                  </Select>
+                  <p style={{ fontSize: "0.7rem", color: "rgba(255,255,255,0.4)", marginTop: "0.3rem" }}>
+                    ⚠️ Passer de « hebdomadaire » à « une seule fois » supprime les autres dates déjà générées.
+                  </p>
+                </Field>
+              </ModalBody>
+
+              <ModalFooter>
+                <DangerBtn
+                  type="button"
+                  disabled={savingGroup || busyGroupe}
+                  onClick={() => annulerAnimation(editingGroupe)}
+                >
+                  🗑️ Supprimer {premiere.recurrenceId ? "toute la série" : "l'animation"}
+                </DangerBtn>
+
+                <div style={{ display: "flex", gap: "0.6rem", flex: 1, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                  <RejectBtn type="button" onClick={fermerEditionGroupe} disabled={savingGroup} style={{ flex: "0 1 140px" }}>
+                    Annuler
+                  </RejectBtn>
+                  <ValidateBtn type="button" onClick={enregistrerModifGroupe} disabled={savingGroup} style={{ flex: "0 1 200px" }}>
+                    {savingGroup ? "Enregistrement…" : "Enregistrer"}
+                  </ValidateBtn>
+                </div>
+              </ModalFooter>
+            </ModalContent>
+          </ModalOverlay>
+        );
+      })()}
 
       {/* ── Onglet Inscriptions animations ── */}
       {onglet === "inscriptions-anim" && (
