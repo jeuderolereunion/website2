@@ -18,7 +18,7 @@ import {
   runTransaction,
   serverTimestamp,
   updateDoc,
-  deleteDoc,      // ← ajouté
+  deleteDoc,
   arrayUnion,
   arrayRemove,
 } from "firebase/firestore";
@@ -62,6 +62,11 @@ type EventDoc = {
   regles?: string[];
   photos?: string[];
   image?: string;
+  annule?: boolean;
+  annuleAt?: any;
+  // Coordonnées publiques du MJ organisateur (opt-in explicite)
+  mjContact?: string;         // email ou téléphone du MJ
+  mjContactPublic?: boolean;  // consentement explicite du MJ
 };
 
 // Table proposée par un MJ pour une animation (sous-collection evenements/{id}/tables)
@@ -75,6 +80,9 @@ type TableMJ = {
   inscrits: number;
   status: "pending" | "approved" | "rejected";
   createdAt?: any;
+  // Coordonnées publiques du MJ de cette table précise (opt-in explicite)
+  mjContact?: string;
+  mjContactPublic?: boolean;
 };
 
 type AdresseSuggestion = {
@@ -87,7 +95,18 @@ type AdresseSuggestion = {
 type UserProfile = {
   pseudo: string;
   email: string;
+  telephone?: string;
   role?: string;
+};
+
+// Ligne affichée dans la liste des inscrits (côté organisateur/admin)
+type InscritRow = {
+  id: string;
+  nom: string;
+  email?: string;
+  telephone?: string;
+  statut?: "confirme" | "attente";
+  tableMjNom?: string; // uniquement pour les animations, pour savoir à quelle table
 };
 
 // ─── Styled ──────────────────────────────────────────────────────────────────
@@ -127,6 +146,22 @@ const DeleteBtn = styled.button`
   &:disabled { opacity: 0.5; cursor: not-allowed; }
 `;
 
+const CancelEventBtn = styled.button`
+  width: 100%;
+  padding: 0.55rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255,180,60,0.3);
+  background: transparent;
+  color: rgba(255,190,90,0.8);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  margin-bottom: 0.5rem;
+  transition: background 150ms, color 150ms;
+  &:hover:not(:disabled) { background: rgba(255,180,60,0.1); color: #ffcf7d; }
+  &:disabled { opacity: 0.5; cursor: not-allowed; }
+`;
+
 const StateTitle = styled.h1`font-size: 1.4rem; font-weight: 700;`;
 const StateSub = styled.p`
   font-size: 0.9rem;
@@ -145,7 +180,7 @@ const BackLinkPlain = styled(Link)`
   &:hover { color: #c8a8ff; }
 `;
 
-const Hero = styled.section<{ $bg?: string }>`
+const Hero = styled.section<{ $bg?: string; $cancelled?: boolean }>`
   position: relative;
   min-height: 280px;
   display: flex;
@@ -155,6 +190,8 @@ const Hero = styled.section<{ $bg?: string }>`
   background:
     linear-gradient(180deg, rgba(13,13,20,0.15) 0%, rgba(13,13,20,0.92) 100%),
     ${p => p.$bg ? `url(${p.$bg}) center/cover` : "linear-gradient(135deg, #3C3489, #534AB7)"};
+  transition: filter 300ms ease;
+  ${p => p.$cancelled && `filter: grayscale(0.65) brightness(0.65);`}
 `;
 
 const BackLink = styled(Link)`
@@ -181,6 +218,44 @@ const CatPill = styled.span`
   color: #c8a8ff;
   margin-bottom: 0.75rem;
   width: fit-content;
+`;
+
+const CancelledBadge = styled.div`
+  position: absolute;
+  top: 5rem;
+  right: 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 1.1rem;
+  border-radius: 999px;
+  background: rgba(255,60,60,0.15);
+  border: 1px solid rgba(255,80,80,0.4);
+  color: #ff8080;
+  font-size: 0.85rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  backdrop-filter: blur(4px);
+  z-index: 2;
+
+  @media (max-width: 640px) {
+    top: 4.25rem;
+    right: 1rem;
+    font-size: 0.72rem;
+    padding: 0.4rem 0.8rem;
+  }
+`;
+
+const CancelledNotice = styled.div`
+  padding: 0.65rem 0.9rem;
+  border-radius: 10px;
+  background: rgba(255,80,80,0.1);
+  border: 1px solid rgba(255,80,80,0.3);
+  color: #ff8080;
+  font-size: 0.8rem;
+  margin-bottom: 0.75rem;
+  line-height: 1.5;
 `;
 
 const HeroTitle = styled.h1`
@@ -352,6 +427,23 @@ const TableFormBox = styled.div`
   display: flex;
   flex-direction: column;
   gap: 0.7rem;
+`;
+
+const CheckboxRow = styled.label`
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  color: rgba(255,255,255,0.7);
+  cursor: pointer;
+  user-select: none;
+`;
+
+const Checkbox = styled.input`
+  width: 16px;
+  height: 16px;
+  accent-color: #7c4dff;
+  cursor: pointer;
 `;
 
 const MyTableStatus = styled.div<{ $status: "pending" | "approved" | "rejected" }>`
@@ -679,6 +771,75 @@ const ProfileLink = styled(Link)`
   color: rgba(160,120,255,0.8);
   text-decoration: none;
   &:hover { color: #c8a8ff; }
+`;
+
+const MJContactRow = styled.div`
+  margin-top: 0.4rem;
+  font-size: 0.78rem;
+  color: rgba(255,255,255,0.5);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+`;
+
+// ── Liste des inscrits (organisateur / admin) ─────────────────────────────────
+
+const InscritsToggle = styled.button`
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+`;
+
+const InscritsCount = styled.span`
+  font-size: 0.78rem;
+  color: rgba(160,120,255,0.8);
+  font-weight: 700;
+`;
+
+const InscritsListWrap = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.9rem;
+  max-height: 260px;
+  overflow-y: auto;
+`;
+
+const InscritCard = styled.div`
+  padding: 0.6rem 0.75rem;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+`;
+
+const InscritName = styled.p`
+  font-size: 0.84rem;
+  font-weight: 600;
+  margin: 0 0 2px;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+`;
+
+const InscritMeta = styled.p`
+  font-size: 0.74rem;
+  color: rgba(255,255,255,0.45);
+  margin: 0;
+`;
+
+const WaitlistTag = styled.span`
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(255,180,60,0.15);
+  color: #ffcf7d;
 `;
 
 // ── Modal inscription ─────────────────────────────────────────────────────────
@@ -1109,8 +1270,10 @@ export default function EventDetailClient({ slug, id }: { slug: string; id: stri
   const [notFound, setNotFound] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [mjNom, setMjNom]       = useState<string | null>(null);
-const router = useRouter();
-const [deletingEvent, setDeletingEvent] = useState(false);
+  const router = useRouter();
+  const [deletingEvent, setDeletingEvent] = useState(false);
+  const [cancellingEvent, setCancellingEvent] = useState(false);
+
   // Auth
   const [user, setUser]               = useState<User | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
@@ -1124,6 +1287,7 @@ const [deletingEvent, setDeletingEvent] = useState(false);
   const [selectedTable, setSelectedTable] = useState<TableMJ | null>(null);
   const [submitting, setSubmitting]       = useState(false);
   const [success, setSuccess]             = useState(false);
+  const [telephoneInput, setTelephoneInput] = useState("");
   const [waitlisted, setWaitlisted]       = useState(false);
 
   // Partage
@@ -1152,11 +1316,22 @@ const [deletingEvent, setDeletingEvent] = useState(false);
   const [allTables, setAllTables]             = useState<TableMJ[]>([]);
   const [loadingTables, setLoadingTables]     = useState(true);
   const [tableFormOpen, setTableFormOpen]     = useState(false);
-  const [tableForm, setTableForm]             = useState({ systeme: "", description: "", placesMax: 4 });
+  const [tableForm, setTableForm]             = useState({
+    systeme: "",
+    description: "",
+    placesMax: 4,
+    contact: "",
+    contactPublic: false,
+  });
   const [submittingTable, setSubmittingTable] = useState(false);
 
   // Table(s) auxquelles le joueur connecté est déjà inscrit sur cette animation
   const [mesTablesInscrites, setMesTablesInscrites] = useState<Set<string>>(new Set());
+
+  // Liste des inscrits — réservée à l'organisateur / admin
+  const [inscritsList, setInscritsList]       = useState<InscritRow[]>([]);
+  const [loadingInscrits, setLoadingInscrits] = useState(true);
+  const [inscritsOpen, setInscritsOpen]       = useState(false);
 
   // ── Chargement événement ──────────────────────────────────────────────────
 
@@ -1231,9 +1406,42 @@ const [deletingEvent, setDeletingEvent] = useState(false);
     return () => { cancelled = true; };
   }, [event?.id, slug, user]);
 
+  // Charge la liste nominative des inscrits — réservé au MJ organisateur ou à
+  // un admin. Ne se déclenche que si l'un ou l'autre est confirmé.
+  useEffect(() => {
+    if (!event) { setLoadingInscrits(false); return; }
+    const peutVoir = isAdmin || (!!user && event.mjId === user.uid);
+    if (!peutVoir) { setLoadingInscrits(false); setInscritsList([]); return; }
+
+    let cancelled = false;
+    setLoadingInscrits(true);
+
+    const source = slug === "animations"
+      ? getDocs(collection(db, "evenements", event.id, "inscriptions"))
+      : getDocs(query(collection(db, "inscriptions"), where("eventId", "==", event.id)));
+
+    source.then(snap => {
+      if (cancelled) return;
+      setInscritsList(snap.docs.map(d => {
+        const data = d.data() as any;
+        return {
+          id: d.id,
+          nom: data.pseudo || data.nom || data.email || "Anonyme",
+          email: data.email,
+          telephone: data.telephone,
+          statut: data.statut,
+          tableMjNom: data.tableMjNom,
+        };
+      }));
+      setLoadingInscrits(false);
+    }).catch(() => { if (!cancelled) setLoadingInscrits(false); });
+
+    return () => { cancelled = true; };
+  }, [event, user, isAdmin, slug]);
+
   const approvedTables = allTables.filter(t => t.status === "approved");
   const myTable = user ? allTables.find(t => t.mjId === user.uid) ?? null : null;
-useEffect(() => {
+  useEffect(() => {
     if (
       searchParams.get("action") === "proposer-table" &&
       (userProfile?.role === "mj" || userProfile?.role === "admin") &&
@@ -1244,7 +1452,7 @@ useEffect(() => {
       document.getElementById("section-tables")?.scrollIntoView({ behavior: "smooth" });
     }
   }, [searchParams, userProfile, myTable, authLoading]);
-  
+
   // ── Auth ──────────────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -1254,7 +1462,7 @@ useEffect(() => {
         const userSnap = await getDoc(doc(db, "users", firebaseUser.uid));
         if (userSnap.exists()) {
           const d = userSnap.data();
-          setUserProfile({ pseudo: d.pseudo || "", email: firebaseUser.email || "", role: d.role });
+          setUserProfile({ pseudo: d.pseudo || "", email: firebaseUser.email || "", telephone: d.telephone || "", role: d.role });
         } else {
           setUserProfile({ pseudo: "", email: firebaseUser.email || "" });
         }
@@ -1276,6 +1484,7 @@ useEffect(() => {
     }
     if (event?.mjId && event.mjId === user.uid) return;
     setSelectedTable(null);
+    setTelephoneInput(userProfile?.telephone || "");
     setSelectedEvent(event);
   }
 
@@ -1288,6 +1497,7 @@ useEffect(() => {
       return;
     }
     setSelectedTable(table);
+    setTelephoneInput(userProfile?.telephone || "");
     setSelectedEvent(event);
   }
 
@@ -1295,6 +1505,11 @@ useEffect(() => {
     if (!selectedEvent || !user || !userProfile) return;
     setSubmitting(true);
     try {
+      // Sauvegarde le téléphone sur le profil pour le pré-remplir la prochaine fois
+      if (telephoneInput.trim() && telephoneInput.trim() !== userProfile.telephone) {
+        updateDoc(doc(db, "users", user.uid), { telephone: telephoneInput.trim() }).catch(() => {});
+      }
+
       // ── Animations : inscription à une table précise ──────────────────────
       if (slug === "animations" && selectedTable) {
         const dejaInscritQuery = query(
@@ -1333,6 +1548,7 @@ useEffect(() => {
           prenom:     userProfile.pseudo,
           pseudo:     userProfile.pseudo,
           email:      userProfile.email,
+          telephone:  telephoneInput.trim(),
           statut:     result.statut,
           createdAt:  serverTimestamp(),
         });
@@ -1343,6 +1559,38 @@ useEffect(() => {
             : t
         ));
         setMesTablesInscrites(prev => new Set(prev).add(tableCourante.id));
+
+        // Reflète immédiatement la nouvelle inscription dans la liste affichée
+        // à l'organisateur/admin, sans attendre un rechargement.
+        setInscritsList(prev => [...prev, {
+          id: `local-${Date.now()}`,
+          nom: userProfile.pseudo || userProfile.email,
+          email: userProfile.email,
+          telephone: telephoneInput.trim(),
+          statut: result.statut,
+          tableMjNom: tableCourante.mjNom,
+        }]);
+
+        // ── Email de confirmation — inscription à une table d'animation ──
+        // Les coordonnées transmises sont celles du MJ DE LA TABLE (pas
+        // forcément l'organisateur global de l'animation), et uniquement
+        // s'il a explicitement consenti à les rendre publiques.
+        if (result.statut === "confirme") {
+          await fetch("/api/inscription", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              nom:        userProfile.pseudo || userProfile.email,
+              email:      userProfile.email,
+              eventTitle: `${selectedEvent.titre} — Table de ${tableCourante.mjNom}${tableCourante.systeme ? ` (${tableCourante.systeme})` : ""}`,
+              date:       selectedEvent.date,
+              time:       selectedEvent.heure,
+              mjNom:           tableCourante.mjNom ?? undefined,
+              mjContact:       tableCourante.mjContact ?? undefined,
+              mjContactPublic: tableCourante.mjContactPublic === true,
+            }),
+          }).catch(err => console.error("Échec envoi email table :", err));
+        }
 
         setWaitlisted(result.statut === "attente");
         setSuccess(true);
@@ -1384,12 +1632,25 @@ useEffect(() => {
         nom:        userProfile.pseudo || userProfile.email,
         email:      userProfile.email,
         pseudo:     userProfile.pseudo,
+        telephone:  telephoneInput.trim(),
         userId:     user.uid,
         statut:     result.statut,
         createdAt:  serverTimestamp(),
       });
 
+      // Reflète immédiatement la nouvelle inscription dans la liste affichée
+      // à l'organisateur/admin, sans attendre un rechargement.
+      setInscritsList(prev => [...prev, {
+        id: `local-${Date.now()}`,
+        nom: userProfile.pseudo || userProfile.email,
+        email: userProfile.email,
+        telephone: telephoneInput.trim(),
+        statut: result.statut,
+      }]);
+
       if (result.statut === "confirme") {
+        // Coordonnées du MJ organisateur de l'événement classique — envoyées
+        // uniquement s'il a explicitement consenti à les rendre publiques.
         await fetch("/api/inscription", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1399,6 +1660,9 @@ useEffect(() => {
             eventTitle: selectedEvent.titre,
             date:       selectedEvent.date,
             time:       selectedEvent.heure,
+            mjNom:           mjNom ?? undefined,
+            mjContact:       selectedEvent.mjContact ?? undefined,
+            mjContactPublic: selectedEvent.mjContactPublic === true,
           }),
         });
       }
@@ -1417,6 +1681,7 @@ useEffect(() => {
     setSelectedTable(null);
     setSuccess(false);
     setWaitlisted(false);
+    setTelephoneInput("");
   }
 
   // ── Proposition de table MJ ────────────────────────────────────────────────
@@ -1433,6 +1698,8 @@ useEffect(() => {
         placesMax: Number(tableForm.placesMax) || 1,
         inscrits: 0,
         status: "pending",
+        mjContact: tableForm.contact || "",
+        mjContactPublic: !!tableForm.contactPublic && !!tableForm.contact,
         createdAt: serverTimestamp(),
       });
       setAllTables(prev => [...prev, {
@@ -1444,9 +1711,11 @@ useEffect(() => {
         placesMax: Number(tableForm.placesMax) || 1,
         inscrits: 0,
         status: "pending",
+        mjContact: tableForm.contact || "",
+        mjContactPublic: !!tableForm.contactPublic && !!tableForm.contact,
       }]);
       setTableFormOpen(false);
-      setTableForm({ systeme: "", description: "", placesMax: 4 });
+      setTableForm({ systeme: "", description: "", placesMax: 4, contact: "", contactPublic: false });
     } catch (err: any) {
       alert("Erreur lors de la proposition de table : " + err.message);
     } finally {
@@ -1584,6 +1853,8 @@ useEffect(() => {
       ville:       event.ville ?? "",
       lieuDetail:  event.lieuDetail ?? "",
       image:       event.image ?? "",
+      mjContact:       event.mjContact ?? "",
+      mjContactPublic: event.mjContactPublic ?? false,
     });
     setEditRules(event.regles ?? []);
     setEditOpen(true);
@@ -1613,6 +1884,8 @@ useEffect(() => {
         lieuDetail:  editForm.lieuDetail || "",
         regles:      editRules.filter(r => r.trim() !== ""),
         image:       editForm.image || "",
+        mjContact:       editForm.mjContact || "",
+        mjContactPublic: !!editForm.mjContactPublic && !!editForm.mjContact,
       };
 
       await updateDoc(doc(db, "evenements", event.id), payload);
@@ -1625,51 +1898,114 @@ useEffect(() => {
     }
   }
 
-  async function handleDeleteEvent() {
-  if (!event) return;
+  // ── Annulation de l'événement ───────────────────────────────────────────────
 
-  const confirmMsg = estAnimation
-    ? "Supprimer cette animation ? Toutes les tables et inscriptions associées seront perdues. Cette action est irréversible."
-    : "Supprimer cet événement ? Toutes les inscriptions associées seront perdues. Cette action est irréversible.";
+  async function handleCancelEvent() {
+    if (!event) return;
 
-  if (!window.confirm(confirmMsg)) return;
+    const confirmMsg = estAnimation
+      ? "Annuler cette animation ? Tous les joueurs inscrits (toutes tables confondues) recevront un email de notification. L'annonce restera visible sur le site avec la mention « Annulé »."
+      : "Annuler cet événement ? Les inscrits recevront un email de notification. L'annonce restera visible sur le site avec la mention « Annulé ».";
 
-  setDeletingEvent(true);
-  try {
-    // Supprime les photos de la galerie (Firebase Storage)
-    if (event.photos && event.photos.length > 0) {
-      const storage = getStorage();
-      await Promise.all(
-        event.photos.map(url =>
-          deleteObject(storageRef(storage, url)).catch(() => {})
-        )
-      );
+    if (!window.confirm(confirmMsg)) return;
+
+    setCancellingEvent(true);
+    try {
+      // 1. Récupère les inscrits à prévenir
+      let destinataires: { email: string; nom?: string }[] = [];
+
+      if (estAnimation) {
+        const subSnap = await getDocs(collection(db, "evenements", event.id, "inscriptions"));
+        destinataires = subSnap.docs
+          .map(d => d.data() as any)
+          .filter(d => !!d.email)
+          .map(d => ({ email: d.email, nom: d.pseudo || d.prenom }));
+      } else {
+        const rootSnap = await getDocs(
+          query(collection(db, "inscriptions"), where("eventId", "==", event.id))
+        );
+        destinataires = rootSnap.docs
+          .map(d => d.data() as any)
+          .filter(d => !!d.email)
+          .map(d => ({ email: d.email, nom: d.pseudo || d.nom }));
+      }
+
+      // 2. Marque l'événement comme annulé (aucune suppression de données)
+      await updateDoc(doc(db, "evenements", event.id), {
+        annule: true,
+        annuleAt: serverTimestamp(),
+      });
+      setEvent(prev => prev ? { ...prev, annule: true } : prev);
+
+      // 3. Envoie l'email d'annulation à chaque inscrit
+      if (destinataires.length > 0) {
+        const res = await fetch("/api/annulation", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            destinataires,
+            eventTitle: event.titre,
+            date: event.date,
+            heure: event.heure,
+            lieu: lieuAffiche,
+          }),
+        });
+        if (!res.ok) {
+          console.error("Échec de l'envoi des emails d'annulation");
+        }
+      }
+    } catch (err: any) {
+      alert("Erreur lors de l'annulation : " + (err.message || "inconnue"));
+    } finally {
+      setCancellingEvent(false);
     }
-
-    // Supprime les inscriptions liées (collection racine "inscriptions")
-    const inscriptionsSnap = await getDocs(
-      query(collection(db, "inscriptions"), where("eventId", "==", event.id))
-    );
-    await Promise.all(inscriptionsSnap.docs.map(d => deleteDoc(d.ref)));
-
-    // Si c'est une animation : supprime les sous-collections tables + inscriptions
-    if (estAnimation) {
-      const tablesSnap = await getDocs(collection(db, "evenements", event.id, "tables"));
-      await Promise.all(tablesSnap.docs.map(d => deleteDoc(d.ref)));
-
-      const subInscriptionsSnap = await getDocs(collection(db, "evenements", event.id, "inscriptions"));
-      await Promise.all(subInscriptionsSnap.docs.map(d => deleteDoc(d.ref)));
-    }
-
-    // Supprime le document événement lui-même
-    await deleteDoc(doc(db, "evenements", event.id));
-
-    router.push(`/evenements/${slug}`);
-  } catch (err: any) {
-    alert("Erreur lors de la suppression : " + (err.message || "inconnue"));
-    setDeletingEvent(false);
   }
-}
+
+  async function handleDeleteEvent() {
+    if (!event) return;
+
+    const confirmMsg = estAnimation
+      ? "Supprimer cette animation ? Toutes les tables et inscriptions associées seront perdues. Cette action est irréversible."
+      : "Supprimer cet événement ? Toutes les inscriptions associées seront perdues. Cette action est irréversible.";
+
+    if (!window.confirm(confirmMsg)) return;
+
+    setDeletingEvent(true);
+    try {
+      // Supprime les photos de la galerie (Firebase Storage)
+      if (event.photos && event.photos.length > 0) {
+        const storage = getStorage();
+        await Promise.all(
+          event.photos.map(url =>
+            deleteObject(storageRef(storage, url)).catch(() => {})
+          )
+        );
+      }
+
+      // Supprime les inscriptions liées (collection racine "inscriptions")
+      const inscriptionsSnap = await getDocs(
+        query(collection(db, "inscriptions"), where("eventId", "==", event.id))
+      );
+      await Promise.all(inscriptionsSnap.docs.map(d => deleteDoc(d.ref)));
+
+      // Si c'est une animation : supprime les sous-collections tables + inscriptions
+      if (estAnimation) {
+        const tablesSnap = await getDocs(collection(db, "evenements", event.id, "tables"));
+        await Promise.all(tablesSnap.docs.map(d => deleteDoc(d.ref)));
+
+        const subInscriptionsSnap = await getDocs(collection(db, "evenements", event.id, "inscriptions"));
+        await Promise.all(subInscriptionsSnap.docs.map(d => deleteDoc(d.ref)));
+      }
+
+      // Supprime le document événement lui-même
+      await deleteDoc(doc(db, "evenements", event.id));
+
+      router.push(`/evenements/${slug}`);
+    } catch (err: any) {
+      alert("Erreur lors de la suppression : " + (err.message || "inconnue"));
+      setDeletingEvent(false);
+    }
+  }
 
   // ── États de chargement / erreur ──────────────────────────────────────────
 
@@ -1720,6 +2056,10 @@ useEffect(() => {
   const canDeletePhoto  = isAdmin;
   const canUploadPhoto  = estOrganisateur || isAdmin;
 
+  // Coordonnées du MJ à afficher publiquement sur la fiche — uniquement
+  // si consentement explicite ET un contact renseigné.
+  const afficherContactMJPublic = !!event.mjContactPublic && !!event.mjContact;
+
   // Pour l'inscription en cours (peut concerner une table précise)
   const cibleModal = selectedTable
     ? { places: selectedTable.placesMax, inscrits: selectedTable.inscrits ?? 0 }
@@ -1732,11 +2072,12 @@ useEffect(() => {
     <Page>
       <Navigation />
 
-      <Hero $bg={event.image}>
+      <Hero $bg={event.image} $cancelled={event.annule}>
         <BackLink href={`/evenements/${slug}`}>
           ← {CAT_LABELS[slug] ?? "Événements"}
         </BackLink>
         <CatPill>{CAT_LABELS[slug] ?? "Événement"}</CatPill>
+        {event.annule && <CancelledBadge>🚫 Annulé</CancelledBadge>}
         <HeroTitle>{event.titre}</HeroTitle>
         <HeroMeta>
           <MetaItem>📅 {formatDateFr(event.date)} </MetaItem>
@@ -1781,6 +2122,7 @@ useEffect(() => {
                     const tableComplete    = placesTableDispo <= 0;
                     const dejaInscrit      = mesTablesInscrites.has(t.id);
                     const estMJDeCetteTable = user?.uid === t.mjId;
+                    const contactTablePublic = !!t.mjContactPublic && !!t.mjContact;
 
                     return (
                       <TableCard key={t.id}>
@@ -1791,9 +2133,14 @@ useEffect(() => {
                           </TablePlacesBadge>
                         </TableCardHeader>
                         <TableDesc>{t.description}</TableDesc>
+                        {contactTablePublic && (
+                          <MJContactRow>✉️ {t.mjContact}</MJContactRow>
+                        )}
 
                         {estMJDeCetteTable ? (
                           <HintText>🎭 C'est votre table</HintText>
+                        ) : event.annule ? (
+                          <HintText>🚫 Annulé</HintText>
                         ) : dejaInscrit ? (
                           <MyRegistrationStatus>✅ Vous êtes inscrit à cette table</MyRegistrationStatus>
                         ) : mesTablesInscrites.size > 0 ? (
@@ -1848,6 +2195,25 @@ useEffect(() => {
                         onChange={e => setTableForm(f => ({ ...f, placesMax: Number(e.target.value) }))}
                       />
                     </div>
+                    <div>
+                      <Label>Contact (email ou téléphone) — optionnel</Label>
+                      <Input
+                        value={tableForm.contact}
+                        onChange={e => setTableForm(f => ({ ...f, contact: e.target.value }))}
+                        placeholder="votremail@exemple.com"
+                      />
+                      <HintText>
+                        Ce contact n'est communiqué aux joueurs inscrits que si vous cochez la case ci-dessous.
+                      </HintText>
+                    </div>
+                    <CheckboxRow>
+                      <Checkbox
+                        type="checkbox"
+                        checked={tableForm.contactPublic}
+                        onChange={e => setTableForm(f => ({ ...f, contactPublic: e.target.checked }))}
+                      />
+                      J'accepte que mon contact soit visible par les joueurs inscrits à ma table
+                    </CheckboxRow>
                     <ModalActions style={{ marginTop: 0 }}>
                       <CancelBtn onClick={() => setTableFormOpen(false)}>Annuler</CancelBtn>
                       <SaveBtn
@@ -1971,13 +2337,21 @@ useEffect(() => {
 
             )}
 
-            {canEdit && (
-  <DeleteBtn onClick={handleDeleteEvent} disabled={deletingEvent}>
-    {deletingEvent ? "Suppression…" : "🗑️ Supprimer l'événement"}
-  </DeleteBtn>
-)}
+            {canEdit && !event.annule && (
+              <CancelEventBtn onClick={handleCancelEvent} disabled={cancellingEvent}>
+                {cancellingEvent ? "Annulation…" : "🚫 Annuler l'événement"}
+              </CancelEventBtn>
+            )}
 
-            {estAnimation ? (
+            {canEdit && (
+              <DeleteBtn onClick={handleDeleteEvent} disabled={deletingEvent}>
+                {deletingEvent ? "Suppression…" : "🗑️ Supprimer l'événement"}
+              </DeleteBtn>
+            )}
+
+            {event.annule ? (
+              <CancelledNotice>🚫 Cet événement a été annulé. Les inscriptions sont fermées.</CancelledNotice>
+            ) : estAnimation ? (
               <HintText style={{ margin: "0 0 0.75rem" }}>
                 👉 Choisissez une table dans la section « Tables proposées par les MJ » ci-contre pour vous inscrire.
               </HintText>
@@ -2003,6 +2377,9 @@ useEffect(() => {
                 <MJSub>Organisateur</MJSub>
               </div>
             </MJRow>
+            {afficherContactMJPublic && (
+              <MJContactRow>✉️ {event.mjContact}</MJContactRow>
+            )}
             <Divider />
             <MJStats>
               <MJStat><MJStatVal>–</MJStatVal><MJStatLbl>Parties</MJStatLbl></MJStat>
@@ -2016,6 +2393,41 @@ useEffect(() => {
               </>
             )}
           </AsideCard>
+
+          {/* Liste des inscrits — réservée à l'organisateur / admin */}
+          {canEdit && (
+            <AsideCard>
+              <InscritsToggle onClick={() => setInscritsOpen(o => !o)}>
+                <SectionLabel style={{ margin: 0 }}>Inscrits</SectionLabel>
+                <InscritsCount>
+                  {loadingInscrits ? "…" : inscritsList.length} {inscritsOpen ? "▲" : "▼"}
+                </InscritsCount>
+              </InscritsToggle>
+
+              {inscritsOpen && (
+                loadingInscrits ? (
+                  <HintText style={{ marginTop: "0.75rem" }}>Chargement…</HintText>
+                ) : inscritsList.length === 0 ? (
+                  <HintText style={{ marginTop: "0.75rem" }}>Aucun inscrit pour le moment.</HintText>
+                ) : (
+                  <InscritsListWrap>
+                    {inscritsList.map(insc => (
+                      <InscritCard key={insc.id}>
+                        <InscritName>
+                          {insc.nom}
+                          {insc.statut === "attente" && <WaitlistTag>Liste d'attente</WaitlistTag>}
+                        </InscritName>
+                        <InscritMeta>
+                          {[insc.email, insc.telephone].filter(Boolean).join(" · ") || "Aucun contact renseigné"}
+                          {insc.tableMjNom ? ` · Table de ${insc.tableMjNom}` : ""}
+                        </InscritMeta>
+                      </InscritCard>
+                    ))}
+                  </InscritsListWrap>
+                )
+              )}
+            </AsideCard>
+          )}
         </Aside>
       </Body>
 
@@ -2053,6 +2465,17 @@ useEffect(() => {
                     </UserDetails>
                   </UserInfoBox>
                 )}
+
+                <div style={{ marginBottom: "1.25rem" }}>
+                  <Label>Numéro de téléphone (optionnel)</Label>
+                  <Input
+                    type="tel"
+                    value={telephoneInput}
+                    onChange={e => setTelephoneInput(e.target.value)}
+                    placeholder="0692 XX XX XX"
+                  />
+                  <HintText>Utilisé par le MJ pour vous contacter si besoin (jamais partagé sans votre accord).</HintText>
+                </div>
 
                 <p style={{ fontSize: "0.85rem", color: "rgba(255,255,255,0.45)", marginBottom: "1.5rem" }}>
                   {cibleComplet
@@ -2222,6 +2645,30 @@ useEffect(() => {
                   onChange={e => setEditForm(f => ({ ...f, description: e.target.value }))}
                   rows={4}
                 />
+              </FieldFull>
+
+              {/* Coordonnées publiques du MJ */}
+              <EditSectionLabel>Coordonnées (optionnel)</EditSectionLabel>
+              <FieldFull>
+                <Label>Contact (email ou téléphone)</Label>
+                <Input
+                  value={editForm.mjContact ?? ""}
+                  onChange={e => setEditForm(f => ({ ...f, mjContact: e.target.value }))}
+                  placeholder="votremail@exemple.com"
+                />
+                <HintText>
+                  Ce contact n'est jamais partagé automatiquement — il ne sera communiqué aux inscrits que si vous cochez la case ci-dessous.
+                </HintText>
+              </FieldFull>
+              <FieldFull>
+                <CheckboxRow>
+                  <Checkbox
+                    type="checkbox"
+                    checked={!!editForm.mjContactPublic}
+                    onChange={e => setEditForm(f => ({ ...f, mjContactPublic: e.target.checked }))}
+                  />
+                  J'accepte que ce contact soit visible sur la fiche événement et transmis aux joueurs inscrits
+                </CheckboxRow>
               </FieldFull>
 
               {/* Lieu */}

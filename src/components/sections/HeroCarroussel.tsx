@@ -24,9 +24,10 @@ const trailers = [
     id: 3,
     title: "Tournois & Événements",
     subtitle: "Rencontrez d'autres passionnés et vivez l'aventure",
-    image: "/images/banner3.webp",
+    image: "/images/tournoi.png",
     link: "/evenements/tournois",
   },
+  
 ];
 
 // Seuil minimum (en px) de déplacement horizontal pour considérer un swipe
@@ -36,15 +37,20 @@ const SWIPE_THRESHOLD = 50;
 const Hero = styled.section`
   position: relative;
   width: 100%;
-  height: 750px;
+  height: 900px;
   overflow: hidden;
   border-radius: 20px;
   /* Empêche le navigateur d'intercepter le geste horizontal pour scroller
      la page (le swipe doit rester dédié au changement de slide). */
   touch-action: pan-y;
 
+  @media (max-width: 1980px) {
+    height: 900px;
+    border-radius: 14px;
+  }
+
   @media (max-width: 1024px) {
-    height: 560px;
+    height: 760px;
     border-radius: 14px;
   }
 

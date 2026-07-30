@@ -4,10 +4,14 @@ import { Container } from '@/components/Container';
 import Link from "next/link";
 
 const Content = styled.div`
-  max-width: 900px;
+  max-width: 1000px;
   padding: 0 1.5rem;
   text-align: center;
   width: 100%;
+
+  @media (max-width: 640px) {
+    padding: 0 1rem;
+  }
 `;
 
 const Title = styled.h2`
@@ -16,121 +20,140 @@ const Title = styled.h2`
 
   @media (max-width: 640px) {
     font-size: 1.5rem;
-    margin: 0 0 1rem;
+    margin: 0 0 1.25rem;
   }
 `;
 
 const Grid = styled.div`
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: 1fr 1fr;
   gap: 1.25rem;
 
-  @media (max-width: 640px) {
-    gap: 0.75rem;
+  @media (max-width: 720px) {
+    grid-template-columns: 1fr;
+    gap: 1rem;
   }
 `;
 
-const Card = styled.div`
-  background: rgba(255, 255, 255, 0.07);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 12px;
-  padding: 1.5rem;
+const Card = styled(Link)`
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  min-height: 280px;
+  padding: 2rem;
+  border-radius: 14px;
+  overflow: hidden;
+  isolation: isolate;
   text-align: left;
-  transition: background 150ms ease, border-color 150ms ease;
-  &:hover {
-    background: rgba(255, 255, 255, 0.11);
-    border-color: rgba(255, 255, 255, 0.2);
+  text-decoration: none;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  transition: border-color 250ms ease, transform 250ms ease;
+
+  @media (hover: hover) {
+    &:hover {
+      border-color: rgba(212, 168, 83, 0.6);
+      transform: translateY(-2px);
+    }
+  }
+
+  &:active {
+    transform: scale(0.99);
   }
 
   @media (max-width: 640px) {
-    padding: 0.85rem;
+    min-height: 200px;
+    padding: 1.25rem;
+    border-radius: 10px;
   }
 `;
 
-const CardIcon = styled.span`
-  font-size: 2rem;
-  display: block;
-  margin-bottom: 0.5rem;
+const CardImage = styled.div`
+  position: absolute;
+  inset: 0;
+  background-image: url(${(props) => props.$image});
+  background-size: cover;
+  background-position: center;
+  opacity: 0;
+  transform: scale(1.1);
+  transition: opacity 400ms ease, transform 500ms ease;
+  z-index: -2;
 
-  @media (max-width: 640px) {
-    font-size: 1.4rem;
-    margin-bottom: 0.3rem;
+  @media (hover: hover) {
+    ${Card}:hover & {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+`;
+
+const CardOverlay = styled.div`
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    rgba(8, 8, 12, 0.35) 0%,
+    rgba(8, 8, 12, 0.85) 100%
+  );
+  opacity: 0;
+  transition: opacity 400ms ease;
+  z-index: -1;
+
+  @media (hover: hover) {
+    ${Card}:hover & {
+      opacity: 1;
+    }
   }
 `;
 
 const CardTitle = styled.h3`
-  font-size: 1.15rem;
+  font-size: 1.5rem;
   font-weight: 700;
-  margin: 0 0 0.5rem;
+  margin: 0 0 0.75rem;
+  color: #f0d9a6;
 
   @media (max-width: 640px) {
-    font-size: 0.9rem;
-    margin: 0 0 0.3rem;
+    font-size: 1.15rem;
+    margin: 0 0 0.5rem;
   }
 `;
 
 const CardDescription = styled.p`
-  font-size: 0.9rem;
-  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.95rem;
+  color: rgba(255, 255, 255, 0.75);
   margin: 0;
-  line-height: 1.55;
+  line-height: 1.6;
+  transition: color 300ms ease;
 
-  @media (max-width: 640px) {
-    font-size: 0.75rem;
-    line-height: 1.4;
-    display: -webkit-box;
-    -webkit-line-clamp: 3;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-`;
-
-const EventButton = styled(Link)`
-  display: inline-block;
-  margin-top: 0.75rem;
-  padding: 0.4rem 0.8rem;
-  border-radius: 6px;
-  text-decoration: none;
-  font-weight: 600;
-  font-size: 0.8rem;
-  color: white;
-  background: rgba(120, 80, 255, 0.4);
-  border: 1px solid rgba(160, 120, 255, 0.5);
-  &:hover {
-    background: rgba(120, 80, 255, 0.6);
+  @media (hover: hover) {
+    ${Card}:hover & {
+      color: rgba(255, 255, 255, 0.92);
+    }
   }
 
   @media (max-width: 640px) {
-    font-size: 0.7rem;
-    padding: 0.3rem 0.6rem;
-    margin-top: 0.5rem;
+    font-size: 0.82rem;
+    line-height: 1.5;
   }
 `;
 
-const events = [
+const sections = [
   {
-    icon: '🎲',
-    title: 'Soirées JDR',
     slug: "soirees-jdr",
-    description: 'Sessions de jeu de rôle régulières ouvertes à tous les niveaux. Découvrez de nouveaux univers et maîtres de jeu.',
+    title: "Sessions JDR",
+    image: "/images/events/soirees-jdr.jpg",
+    description:
+      "Des sessions conviviales chaque semaine pour partager des aventures inoubliables autour d'une table, tables ouvertes à tous les niveaux.",
   },
   {
-    icon: '🏆',
-    title: 'Tournois',
-    slug: "tournois",
-    description: "Compétitions amicales entre joueurs. Testez vos compétences dans des scénarios conçus pour le défi.",
-  },
-  {
-    icon: '🃏',
-    title: 'Soirées Jeux',
-    slug: "soirees-jeux",
-    description: 'Soirées dédiées aux jeux de société et de plateau pour varier les plaisirs entre deux aventures.',
-  },
-  {
-    icon: '📖',
-    title: 'Animations',
     slug: "animations",
-    description: 'Ateliers pour découvrir le jeu de rôle de zéro. Un cadre bienveillant pour les nouveaux joueurs.',
+    title: "Animations",
+    image: "/images/events/initiations.jpg",
+    description:
+      "Découvrez le JDR en toute simplicité avec nos initiations gratuites et accompagnées par des MJ passionnés, dans un cadre bienveillant.",
   },
 ];
 
@@ -138,16 +161,14 @@ export default function Events() {
   return (
     <Container id="events">
       <Content>
-        <Title>Nos Événements</Title>
+        <Title>Nos Activités</Title>
         <Grid>
-          {events.map((event) => (
-            <Card key={event.title}>
-              <CardIcon>{event.icon}</CardIcon>
-              <CardTitle>{event.title}</CardTitle>
-              <CardDescription>{event.description}</CardDescription>
-              <EventButton href={`/evenements/${event.slug}`}>
-                Voir les événements →
-              </EventButton>
+          {sections.map((section) => (
+            <Card key={section.slug} href={`/evenements/${section.slug}`}>
+              <CardImage $image={section.image} />
+              <CardOverlay />
+              <CardTitle>{section.title}</CardTitle>
+              <CardDescription>{section.description}</CardDescription>
             </Card>
           ))}
         </Grid>

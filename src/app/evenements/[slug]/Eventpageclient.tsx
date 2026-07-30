@@ -54,7 +54,54 @@ const VenueGrid = styled.div`
     grid-template-columns: 1fr;
   }
 `;
+const SkeletonCard = styled.div`
+  height: 280px;
+  border-radius: 14px;
+  background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.06) 50%, rgba(255,255,255,0.03) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+`;
 
+const SearchRow = styled.div`
+  display: flex;
+  justify-content: center;
+  padding: 0 1.5rem;
+  margin-bottom: 1.5rem;
+`;
+
+const SearchInput = styled.input`
+  width: 100%;
+  max-width: 420px;
+  padding: 0.65rem 1rem;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  color: #fff;
+  font-size: 0.88rem;
+  outline: none;
+  transition: border-color 150ms;
+
+  &::placeholder { color: rgba(255,255,255,0.35); }
+  &:focus { border-color: rgba(160,120,255,0.5); }
+`;
+
+const InscritBadge = styled.span`
+  position: absolute;
+  top: 0.6rem;
+  right: 0.75rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(80,200,120,0.2);
+  border: 1px solid rgba(80,200,120,0.4);
+  color: #7dffb3;
+  backdrop-filter: blur(4px);
+`;
 const VenueCard = styled(Link)`
   display: block;
   background: rgba(255,255,255,0.05);
@@ -979,7 +1026,8 @@ function getJourRecurrent(dateISO: string): string {
 export default function EventPageClient({ slug }: { slug: string }) {
   const cat      = categories[slug];
   const pathname = usePathname();
-
+  const [search, setSearch] = useState("");
+const [mesInscriptions, setMesInscriptions] = useState<Record<string, "confirme" | "attente">>({});
   const [showCalendar, setShowCalendar] = useState(false);
   const [user, setUser]                 = useState<User | null>(null);
   const [userProfile, setUserProfile]   = useState<UserProfile | null>(null);
@@ -1077,6 +1125,27 @@ export default function EventPageClient({ slug }: { slug: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [events]);
 
+
+  // ── Mes inscriptions (pour le badge "Inscrit" sur les cartes) ─────────────
+useEffect(() => {
+  if (!user) {
+    setMesInscriptions({});
+    return;
+  }
+  let cancelled = false;
+  getDocs(
+    query(collection(db, "inscriptions"), where("userId", "==", user.uid))
+  ).then(snap => {
+    if (cancelled) return;
+    const map: Record<string, "confirme" | "attente"> = {};
+    snap.docs.forEach(d => {
+      const data = d.data() as any;
+      if (data.eventId) map[data.eventId] = data.statut;
+    });
+    setMesInscriptions(map);
+  }).catch(() => {});
+  return () => { cancelled = true; };
+}, [user]);
   // ── FullCalendar events ───────────────────────────────────────────────────
 
   const fcEvents = events
@@ -1206,12 +1275,19 @@ export default function EventPageClient({ slug }: { slug: string }) {
   // ── Filtrage ──────────────────────────────────────────────────────────────
 
   const now      = new Date().toISOString().split("T")[0];
-  const filtered = events.filter(e => {
-    if (filter === "upcoming" && e.date < now) return false;
-    if (filter === "past"     && e.date >= now) return false;
-    if (secteurFilter !== "all" && getSecteur(e) !== secteurFilter) return false;
-    return true;
-  });
+const filtered = events.filter(e => {
+  if (filter === "upcoming" && e.date < now) return false;
+  if (filter === "past"     && e.date >= now) return false;
+  if (secteurFilter !== "all" && getSecteur(e) !== secteurFilter) return false;
+  // ← ajouté : recherche texte sur titre et système
+  if (search.trim()) {
+    const q = search.trim().toLowerCase();
+    const matchTitre = e.titre?.toLowerCase().includes(q);
+    const matchSysteme = e.systeme?.toLowerCase().includes(q);
+    if (!matchTitre && !matchSysteme) return false;
+  }
+  return true;
+});
   const upcoming = filtered.filter(e => e.date >= now);
   const past     = filtered.filter(e => e.date < now);
    const venuesAvecStats = slug === "animations"
@@ -1233,85 +1309,91 @@ export default function EventPageClient({ slug }: { slug: string }) {
   // ── Rendu card ────────────────────────────────────────────────────────────
 
   function renderCard(event: EventDoc, i: number, isPast = false) {
-    const placesDispo     = event.places - (event.inscrits ?? 0);
-    const complet         = placesDispo <= 0;
-    const estOrganisateur = !!user && !!event.mjId && event.mjId === user.uid;
-    const { status, label: statusLabel } = getStatusBadge(placesDispo);
-    const secteur = getSecteur(event);
+  const placesDispo     = event.places - (event.inscrits ?? 0);
+  const complet          = placesDispo <= 0;
+  const estOrganisateur  = !!user && !!event.mjId && event.mjId === user.uid;
+  const { status, label: statusLabel } = getStatusBadge(placesDispo);
+  const secteur = getSecteur(event);
+  const monStatutInscription = mesInscriptions[event.id]; // ← ajouté
 
-    const mjNom = event.mjNom
-      || (event.mjId ? mjProfiles[event.mjId] : null)
-      || null;
-    const initiales = mjNom ? getInitiales(mjNom) : "MJ";
+  const mjNom = event.mjNom
+    || (event.mjId ? mjProfiles[event.mjId] : null)
+    || null;
+  const initiales = mjNom ? getInitiales(mjNom) : "MJ";
 
-    let registerLabel = "S'inscrire";
-    if (!user)                registerLabel = "Se connecter";
-    else if (estOrganisateur) registerLabel = "Vous organisez";
-    else if (complet)         registerLabel = "Liste d'attente";
+  let registerLabel = "S'inscrire";
+  if (!user)                     registerLabel = "Se connecter";
+  else if (estOrganisateur)      registerLabel = "Vous organisez";
+  else if (monStatutInscription) registerLabel = "Déjà inscrit"; // ← ajouté
+  else if (complet)              registerLabel = "Liste d'attente";
 
-    return (
-      <Card key={event.id} style={{ animationDelay: `${i * 0.06}s`, opacity: isPast ? 0.55 : 1 }}>
-        <CardHeader $bgImage={event.image}>
-          <CatBadge>{cat.icon} {cat.title}</CatBadge>
+  return (
+    <Card key={event.id} style={{ animationDelay: `${i * 0.06}s`, opacity: isPast ? 0.55 : 1 }}>
+      <CardHeader $bgImage={event.image}>
+        <CatBadge>{cat.icon} {cat.title}</CatBadge>
 
-          {!isPast && (
-            <StatusBadge $status={status}>{statusLabel}</StatusBadge>
-          )}
+        {/* ← ajouté : badge "Inscrit" prioritaire sur le badge de places */}
+        {monStatutInscription ? (
+          <InscritBadge>
+            {monStatutInscription === "confirme" ? "✅ Inscrit" : "📋 Liste d'attente"}
+          </InscritBadge>
+        ) : (
+          !isPast && <StatusBadge $status={status}>{statusLabel}</StatusBadge>
+        )}
 
-          <CardDate dateTime={event.date}>
-            {formatDateFr(event.date)} · {event.heure}
-            
-          </CardDate>
-          <CardTitle>{event.titre}</CardTitle>
+        <CardDate dateTime={event.date}>
+          {formatDateFr(event.date)} · {event.heure}
+        </CardDate>
+        <CardTitle>{event.titre}</CardTitle>
 
-          {(event.ville || secteur) && (
-            <CardLocation>
-              {secteur && <SecteurDot $color={SECTEUR_COLORS[secteur]} />}
-              📍 {event.ville ?? SECTEUR_LABELS[secteur as Secteur]}
-              {event.ville && secteur ? ` · ${SECTEUR_LABELS[secteur]}` : ""}
-            </CardLocation>
-          )}
-        </CardHeader>
+        {(event.ville || secteur) && (
+          <CardLocation>
+            {secteur && <SecteurDot $color={SECTEUR_COLORS[secteur]} />}
+            📍 {event.ville ?? SECTEUR_LABELS[secteur as Secteur]}
+            {event.ville && secteur ? ` · ${SECTEUR_LABELS[secteur]}` : ""}
+          </CardLocation>
+        )}
+      </CardHeader>
 
-        <CardBody>
-          <TagRow>
-            {event.systeme && <Tag>{event.systeme}</Tag>}
-            {event.niveau  && <Tag>⭐ {event.niveau}</Tag>}
-            {event.tags?.slice(0, 2).map(t => <Tag key={t}>{t}</Tag>)}
-          </TagRow>
+      <CardBody>
+        <TagRow>
+          {event.systeme && <Tag>{event.systeme}</Tag>}
+          {event.niveau  && <Tag>⭐ {event.niveau}</Tag>}
+          {event.tags?.slice(0, 2).map(t => <Tag key={t}>{t}</Tag>)}
+        </TagRow>
 
-          <CardDesc>{event.description}</CardDesc>
+        <CardDesc>{event.description}</CardDesc>
 
-          <CardFooter>
-            <MJRow>
-              <MJAvatar>{initiales}</MJAvatar>
-              <MJName>
-                {mjNom ?? (event.mjId ? "Chargement…" : "MJ non renseigné")}
-              </MJName>
-            </MJRow>
+        <CardFooter>
+          <MJRow>
+            <MJAvatar>{initiales}</MJAvatar>
+            <MJName>
+  {mjNom ?? (event.mjId ? (user ? "Chargement…" : "MJ de l'association") : "MJ non renseigné")}
+</MJName>
+          </MJRow>
 
-            <BtnGroup>
-              <DetailBtn href={`/evenements/${slug}/${event.id}`}>
-                Voir →
-              </DetailBtn>
+          <BtnGroup>
+            <DetailBtn href={`/evenements/${slug}/${event.id}`}>
+              Voir →
+            </DetailBtn>
 
-              {!isPast && (
-                <RegisterBtn
-                  disabled={estOrganisateur}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    handleRegisterClick(event);
-                  }}
-                >
-                  {registerLabel}
-                </RegisterBtn>
-              )}
-            </BtnGroup>
-          </CardFooter>
-        </CardBody>
-      </Card>
-    );
-  }
+            {!isPast && (
+              <RegisterBtn
+                disabled={estOrganisateur || !!monStatutInscription} // ← ajouté
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleRegisterClick(event);
+                }}
+              >
+                {registerLabel}
+              </RegisterBtn>
+            )}
+          </BtnGroup>
+        </CardFooter>
+      </CardBody>
+    </Card>
+  );
+}
 
   // ── Rendu principal ───────────────────────────────────────────────────────
 
@@ -1341,6 +1423,16 @@ export default function EventPageClient({ slug }: { slug: string }) {
           </FilterBtn>
         ))}
       </FiltersRow>
+      {slug !== "animations" && (
+  <SearchRow>
+    <SearchInput
+      type="text"
+      placeholder="Rechercher un événement, un système…"
+      value={search}
+      onChange={e => setSearch(e.target.value)}
+    />
+  </SearchRow>
+)}
 
       <SecteurFiltersRow>
         <SecteurBtn
@@ -1393,11 +1485,21 @@ export default function EventPageClient({ slug }: { slug: string }) {
       </Section>
 
       <Section>
-        {loading && <LoadingState>Chargement des événements…</LoadingState>}
+        {loading && (
+  <Grid>
+    <SkeletonCard />
+    <SkeletonCard />
+    <SkeletonCard />
+  </Grid>
+)}
 
         {!loading && filtered.length === 0 && (
-          <EmptyState>Aucun événement pour le moment. Revenez bientôt !</EmptyState>
-        )}
+  <EmptyState>
+    {search.trim()
+      ? `Aucun événement ne correspond à « ${search} ».`
+      : "Aucun événement pour le moment. Revenez bientôt !"}
+  </EmptyState>
+)}
 
           {!loading && slug === "animations" && (
           <>

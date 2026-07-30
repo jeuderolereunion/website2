@@ -10,6 +10,7 @@ import {
   sendEmailVerification,
   signInWithPopup,
   GoogleAuthProvider,
+  sendPasswordResetEmail,
 } from "firebase/auth";
 import {
   doc,
@@ -404,6 +405,13 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
   const [success, setSuccess]                 = useState("");
   const [loading, setLoading]                 = useState(false);
 
+  // ─── États pour le mot de passe oublié ───────────────────────────────────
+
+  const [forgotPasswordMode, setForgotPasswordMode] = useState(false);
+  const [resetEmail, setResetEmail]                 = useState("");
+  const [resetSuccess, setResetSuccess]             = useState(false);
+  const [resetLoading, setResetLoading]             = useState(false);
+
   // ─── État pour la finalisation d'un compte Google (choix du rôle) ───────
   // Un nouvel utilisateur Google n'a pas passé par le RoleGroup du formulaire
   // register (surtout s'il vient de la page login) : on lui demande donc son
@@ -446,12 +454,12 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
   // ─── Crée le profil Firestore pour un utilisateur Google + redirige ─────
 
   async function finalizeGoogleProfile(user: any, chosenRole: RoleChoice) {
-    const [prenom, ...nomParts] = (user.displayName || "").trim().split(" ");
+    const [prenomG, ...nomParts] = (user.displayName || "").trim().split(" ");
     const userNom = nomParts.join(" ") || "Utilisateur";
 
     await setDoc(doc(db, "users", user.uid), {
       uid: user.uid,
-      prenom: prenom || "",
+      prenom: prenomG || "",
       nom: userNom,
       pseudo: user.displayName || "",
       email: (user.email || "").toLowerCase(),
@@ -655,20 +663,96 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
     }
   }
 
+  // ─── Fonction pour gérer la réinitialisation du mot de passe ───────────
+
+  async function handlePasswordReset(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    setResetLoading(true);
+    try {
+      const normalizedEmail = normalizeEmail(resetEmail);
+      await sendPasswordResetEmail(auth, normalizedEmail);
+      setResetSuccess(true);
+    } catch (err: any) {
+      // On évite de révéler si l'email existe ou non (sécurité), sauf erreurs de format
+      if (err?.code === "auth/invalid-email") {
+        setError("Adresse email invalide.");
+      } else {
+        // Firebase renvoie souvent user-not-found : on affiche un message neutre
+        setResetSuccess(true);
+      }
+    } finally {
+      setResetLoading(false);
+    }
+  }
+
+  function handleBackToLogin() {
+    setForgotPasswordMode(false);
+    setResetSuccess(false);
+    setResetEmail("");
+    setError("");
+  }
+
   const isLogin = mode === "login";
 
   return (
     <Wrapper>
       <Card>
         <Logo>⚔️</Logo>
-        <CardTitle>{isLogin ? "Bon retour !" : "Rejoignez l'aventure"}</CardTitle>
+        <CardTitle>
+          {forgotPasswordMode
+            ? "Mot de passe oublié"
+            : isLogin ? "Bon retour !" : "Rejoignez l'aventure"}
+        </CardTitle>
         <CardSubtitle>
-          {isLogin
-            ? "Connectez-vous à votre compte JDR Réunion"
-            : "Créez votre compte pour rejoindre la communauté"}
+          {forgotPasswordMode
+            ? "Recevez un lien pour réinitialiser votre mot de passe"
+            : isLogin
+              ? "Connectez-vous à votre compte JDR Réunion"
+              : "Créez votre compte pour rejoindre la communauté"}
         </CardSubtitle>
 
-        {success ? (
+        {forgotPasswordMode ? (
+          // ─── Formulaire mot de passe oublié ─────────────────────────────
+          resetSuccess ? (
+            <>
+              <SuccessBox>
+                <h3>📧 Email envoyé</h3>
+                <p>Si un compte existe avec cette adresse, un lien de réinitialisation vient de vous être envoyé.</p>
+                <p>Vérifiez aussi vos spams.</p>
+              </SuccessBox>
+              <SwitchLink>
+                <a onClick={handleBackToLogin}>← Retour à la connexion</a>
+              </SwitchLink>
+            </>
+          ) : (
+            <Form onSubmit={handlePasswordReset}>
+              <Field>
+                <Label htmlFor="resetEmail">Email</Label>
+                <Input
+                  id="resetEmail"
+                  type="email"
+                  placeholder="votre@email.com"
+                  value={resetEmail}
+                  onChange={e => setResetEmail(e.target.value)}
+                  autoComplete="email"
+                  required
+                />
+              </Field>
+
+              {error && <ErrorBox role="alert">{error}</ErrorBox>}
+
+              <SubmitBtn type="submit" disabled={resetLoading}>
+                {resetLoading ? <><Spinner /> Envoi…</> : "Envoyer le lien de réinitialisation"}
+              </SubmitBtn>
+
+              <SwitchLink>
+                <a onClick={handleBackToLogin}>← Retour à la connexion</a>
+              </SwitchLink>
+            </Form>
+          )
+        ) : success ? (
+          // ─── Message de succès inscription ──────────────────────────────
           <SuccessBox>
             <h3>🎲 Bienvenue sur JDR Réunion !</h3>
             <p>Votre compte a été créé avec succès.</p>
@@ -677,6 +761,7 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
             <p>Redirection vers la connexion dans quelques secondes…</p>
           </SuccessBox>
         ) : (
+          // ─── Formulaire login / register ────────────────────────────────
           <Form onSubmit={handleSubmit}>
 
             {!isLogin && (
@@ -775,6 +860,14 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
               </InputWrapper>
             </Field>
 
+            {isLogin && (
+              <SwitchLink style={{ marginTop: "-0.5rem", textAlign: "right" }}>
+                <a onClick={() => { setForgotPasswordMode(true); setError(""); }}>
+                  Mot de passe oublié ?
+                </a>
+              </SwitchLink>
+            )}
+
             {!isLogin && (
               <Field>
                 <Label htmlFor="confirm">Confirmer le mot de passe</Label>
@@ -832,7 +925,6 @@ export default function AuthForm({ mode, redirectTo = "/" }: Props) {
                 <>Déjà un compte ? <a onClick={() => router.push("/login")}>Se connecter</a></>
               )}
             </SwitchLink>
-
           </Form>
         )}
       </Card>

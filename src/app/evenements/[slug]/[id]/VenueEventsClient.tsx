@@ -25,13 +25,16 @@ type EventDoc = {
 };
 type InscriptionJoueur = {
   id: string;
-  userId: string;
+  userId?: string;
   prenom?: string;
+  nom?: string;
   pseudo?: string;
   email: string;
   statut: "confirme" | "attente";
   tableId?: string | null;
   tableMjNom?: string | null;
+  manuel?: boolean;        // ← nouveau : ajouté par un MJ, pas par le joueur lui-même
+  nombrePlaces?: number;   // ← nouveau : permet d'ajouter un groupe d'un coup
 };
 type TableMJ = {
   id: string;
@@ -71,6 +74,19 @@ const ReferentTitle = styled.p`
   display: flex;
   align-items: center;
   gap: 0.4rem;
+`;
+const Select = styled.select`
+  width: 100%;
+  padding: 0.55rem 0.75rem;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  color: #fff;
+  font-size: 0.85rem;
+  outline: none;
+  box-sizing: border-box;
+  &:focus { border-color: rgba(0,188,212,0.5); }
+  option { background: #1a1a2e; color: #fff; }
 `;
 
 const ReferentSubLabel = styled.p`
@@ -650,7 +666,11 @@ const [loadingInscriptions, setLoadingInscriptions] = useState<Record<string, bo
   const [tableFormOpen, setTableFormOpen] = useState<Record<string, boolean>>({});
   const [tableForm, setTableForm] = useState<Record<string, typeof TABLE_FORM_VIDE>>({});
   const [submittingTable, setSubmittingTable] = useState<Record<string, boolean>>({});
+  const MANUAL_FORM_VIDE = { prenom: "", nom: "", nombrePlaces: 1, tableId: "" };
 
+const [manualFormOpen, setManualFormOpen] = useState<Record<string, boolean>>({});
+const [manualForm, setManualForm] = useState<Record<string, typeof MANUAL_FORM_VIDE>>({});
+const [submittingManuel, setSubmittingManuel] = useState<Record<string, boolean>>({});
   const [selected, setSelected] = useState<{ event: EventDoc; table: TableMJ | null } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -924,6 +944,122 @@ const [loadingInscriptions, setLoadingInscriptions] = useState<Record<string, bo
     }
   }
 
+  function ouvrirFormulaireManuel(eventId: string) {
+  setManualForm(prev => ({ ...prev, [eventId]: prev[eventId] ?? { ...MANUAL_FORM_VIDE } }));
+  setManualFormOpen(prev => ({ ...prev, [eventId]: true }));
+}
+
+function fermerFormulaireManuel(eventId: string) {
+  setManualFormOpen(prev => ({ ...prev, [eventId]: false }));
+}
+
+async function ajouterInscriptionManuelle(eventId: string) {
+  if (!user) return;
+  const form = manualForm[eventId] ?? MANUAL_FORM_VIDE;
+  if (!form.prenom.trim() || !form.nom.trim() || form.nombrePlaces < 1) {
+    alert("Merci de renseigner le prénom, le nom et le nombre de places.");
+    return;
+  }
+
+  const tableChoisie = form.tableId
+    ? (tablesParEvent[eventId] ?? []).find(t => t.id === form.tableId) ?? null
+    : null;
+
+  setSubmittingManuel(prev => ({ ...prev, [eventId]: true }));
+  try {
+    const result: { statut: "confirme" | "attente" } = { statut: "confirme" };
+
+    if (tableChoisie) {
+      await runTransaction(db, async (transaction) => {
+        const tableRef = doc(db, "evenements", eventId, "tables", tableChoisie.id);
+        const tableSnap = await transaction.get(tableRef);
+        if (!tableSnap.exists()) throw new Error("Cette table n'existe plus.");
+        const d = tableSnap.data();
+        const placesRestantes = (d.placesMax ?? 0) - (d.inscrits || 0);
+        if (placesRestantes >= form.nombrePlaces) {
+          result.statut = "confirme";
+          transaction.update(tableRef, { inscrits: increment(form.nombrePlaces) });
+        } else {
+          result.statut = "attente";
+        }
+      });
+    } else {
+      await runTransaction(db, async (transaction) => {
+        const eventRef = doc(db, "evenements", eventId);
+        const eventSnap = await transaction.get(eventRef);
+        if (!eventSnap.exists()) throw new Error("Animation introuvable");
+        const d = eventSnap.data();
+        const placesRestantes = (d.places ?? 0) - (d.inscrits || 0);
+        if (placesRestantes >= form.nombrePlaces) {
+          result.statut = "confirme";
+          transaction.update(eventRef, { inscrits: increment(form.nombrePlaces) });
+        } else {
+          result.statut = "attente";
+        }
+      });
+    }
+
+    const docRef = await addDoc(collection(db, "evenements", eventId, "inscriptions"), {
+      manuel: true,
+      prenom: form.prenom.trim(),
+      nom: form.nom.trim(),
+      pseudo: `${form.prenom.trim()} ${form.nom.trim()}`,
+      email: "",
+      nombrePlaces: form.nombrePlaces,
+      tableId: tableChoisie?.id || null,
+      tableMjNom: tableChoisie?.mjNom || null,
+      statut: result.statut,
+      ajoutePar: user.uid,
+      createdAt: serverTimestamp(),
+    });
+
+    setInscriptionsParEvent(prev => ({
+      ...prev,
+      [eventId]: [
+        ...(prev[eventId] ?? []),
+        {
+          id: docRef.id,
+          prenom: form.prenom.trim(),
+          nom: form.nom.trim(),
+          pseudo: `${form.prenom.trim()} ${form.nom.trim()}`,
+          email: "",
+          statut: result.statut,
+          tableId: tableChoisie?.id || null,
+          tableMjNom: tableChoisie?.mjNom || null,
+          manuel: true,
+          nombrePlaces: form.nombrePlaces,
+        },
+      ],
+    }));
+
+    if (result.statut === "confirme") {
+      if (tableChoisie) {
+        setTablesParEvent(prev => ({
+          ...prev,
+          [eventId]: (prev[eventId] ?? []).map(t =>
+            t.id === tableChoisie.id
+              ? { ...t, inscrits: (t.inscrits ?? 0) + form.nombrePlaces }
+              : t
+          ),
+        }));
+      } else {
+        setEvents(prev => prev.map(ev =>
+          ev.id === eventId
+            ? { ...ev, inscrits: (ev.inscrits ?? 0) + form.nombrePlaces }
+            : ev
+        ));
+      }
+    }
+
+    setManualFormOpen(prev => ({ ...prev, [eventId]: false }));
+    setManualForm(prev => ({ ...prev, [eventId]: { ...MANUAL_FORM_VIDE } }));
+  } catch (err: any) {
+    alert("Erreur lors de l'ajout : " + (err.message || "inconnue"));
+  } finally {
+    setSubmittingManuel(prev => ({ ...prev, [eventId]: false }));
+  }
+}
+
   const groupesParMois = events.reduce<{ mois: string; events: EventDoc[] }[]>((acc, e) => {
     const mois = formatMoisAnnee(e.date);
     const dernier = acc[acc.length - 1];
@@ -1137,16 +1273,18 @@ const inscriptionsDeCetteDate = inscriptionsParEvent[e.id] ?? [];
       <NoTablesMsg>Aucune inscription pour le moment.</NoTablesMsg>
     ) : (
       inscriptionsDeCetteDate.map(i => (
-        <ReferentItem key={i.id}>
-          <span>
-            {i.pseudo || i.prenom || i.email}
-            {i.tableMjNom ? ` · table de ${i.tableMjNom}` : " · sans table précise"}
-          </span>
-          <StatusPill $tone={i.statut === "confirme" ? "ok" : "warn"}>
-            {i.statut === "confirme" ? "Confirmé" : "Liste d'attente"}
-          </StatusPill>
-        </ReferentItem>
-      ))
+  <ReferentItem key={i.id}>
+    <span>
+      {i.pseudo || `${i.prenom ?? ""} ${i.nom ?? ""}`.trim() || i.email}
+      {i.nombrePlaces && i.nombrePlaces > 1 ? ` · ${i.nombrePlaces} places` : ""}
+      {i.tableMjNom ? ` · table de ${i.tableMjNom}` : " · sans table précise"}
+      {i.manuel ? " · ajouté par le MJ" : ""}
+    </span>
+    <StatusPill $tone={i.statut === "confirme" ? "ok" : "warn"}>
+      {i.statut === "confirme" ? "Confirmé" : "Liste d'attente"}
+    </StatusPill>
+  </ReferentItem>
+))
     )}
 
     <ReferentSubLabel>Tables proposées par les MJ ({tables.length})</ReferentSubLabel>
@@ -1164,6 +1302,79 @@ const inscriptionsDeCetteDate = inscriptionsParEvent[e.id] ?? [];
         </ReferentItem>
       ))
     )}
+    <ReferentSubLabel>Ajouter un joueur manuellement</ReferentSubLabel>
+{!manualFormOpen[e.id] ? (
+  <ProposeTableBtn onClick={(ev) => { ev.stopPropagation(); ouvrirFormulaireManuel(e.id); }}>
+    ➕ Inscrire quelqu'un manuellement
+  </ProposeTableBtn>
+) : (
+  <TableFormBox onClick={(ev) => ev.stopPropagation()}>
+    <div style={{ display: "flex", gap: "0.6rem" }}>
+      <div style={{ flex: 1 }}>
+        <FieldLabel>Prénom</FieldLabel>
+        <Input
+          value={(manualForm[e.id] ?? MANUAL_FORM_VIDE).prenom}
+          onChange={ev => setManualForm(prev => ({
+            ...prev,
+            [e.id]: { ...(prev[e.id] ?? MANUAL_FORM_VIDE), prenom: ev.target.value },
+          }))}
+          placeholder="Jean"
+        />
+      </div>
+      <div style={{ flex: 1 }}>
+        <FieldLabel>Nom</FieldLabel>
+        <Input
+          value={(manualForm[e.id] ?? MANUAL_FORM_VIDE).nom}
+          onChange={ev => setManualForm(prev => ({
+            ...prev,
+            [e.id]: { ...(prev[e.id] ?? MANUAL_FORM_VIDE), nom: ev.target.value },
+          }))}
+          placeholder="Dupont"
+        />
+      </div>
+    </div>
+    <div>
+      <FieldLabel>Nombre de places</FieldLabel>
+      <Input
+        type="number"
+        min={1}
+        value={(manualForm[e.id] ?? MANUAL_FORM_VIDE).nombrePlaces}
+        onChange={ev => setManualForm(prev => ({
+          ...prev,
+          [e.id]: { ...(prev[e.id] ?? MANUAL_FORM_VIDE), nombrePlaces: Number(ev.target.value) },
+        }))}
+      />
+    </div>
+    {tables.filter(t => t.status === "approved").length > 0 && (
+      <div>
+        <FieldLabel>Table (optionnel)</FieldLabel>
+        <Select
+          value={(manualForm[e.id] ?? MANUAL_FORM_VIDE).tableId}
+          onChange={ev => setManualForm(prev => ({
+            ...prev,
+            [e.id]: { ...(prev[e.id] ?? MANUAL_FORM_VIDE), tableId: ev.target.value },
+          }))}
+        >
+          <option value="">Inscription générale (sans table)</option>
+          {tables.filter(t => t.status === "approved").map(t => (
+            <option key={t.id} value={t.id}>
+              {t.mjNom} {t.systeme ? `· ${t.systeme}` : ""}
+            </option>
+          ))}
+        </Select>
+      </div>
+    )}
+    <FormActionsRow>
+      <CancelSmallBtn onClick={() => fermerFormulaireManuel(e.id)}>Annuler</CancelSmallBtn>
+      <SubmitTableBtn
+        disabled={submittingManuel[e.id]}
+        onClick={() => ajouterInscriptionManuelle(e.id)}
+      >
+        {submittingManuel[e.id] ? "Ajout…" : "Ajouter"}
+      </SubmitTableBtn>
+    </FormActionsRow>
+  </TableFormBox>
+)}
   </ReferentPanel>
 )}
                         </ExpandedZone>

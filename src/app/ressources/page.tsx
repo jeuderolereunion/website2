@@ -2,11 +2,45 @@
 
 import styled from "styled-components";
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import { db } from "@/lib/firebase";
 import { auth } from "@/lib/firebase";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { collection, getDocs, addDoc, serverTimestamp } from "firebase/firestore";
 import Navigation from "@/components/Navigation";
+import { makeCloudinaryLoader } from "@/lib/cloudinaryLoader"; // ⚠️ ajuste le chemin si besoin
+
+// ─── Config Cloudinary ─────────────────────────────────────────────────────
+const CLOUDINARY_CLOUD_NAME = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
+const CLOUDINARY_UPLOAD_PRESET = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
+
+const cloudinaryLoader = makeCloudinaryLoader();
+
+async function uploaderImageCloudinary(file: File): Promise<string> {
+  if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_UPLOAD_PRESET) {
+    throw new Error("Configuration Cloudinary manquante (cloud name ou upload preset).");
+  }
+
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
+  formData.append("folder", "ressources_couvertures");
+
+  const res = await fetch(
+    `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`,
+    { method: "POST", body: formData }
+  );
+
+  if (!res.ok) {
+    const errText = await res.text();
+    console.error("Erreur upload Cloudinary:", res.status, errText);
+    throw new Error("Échec de l'upload de l'image sur Cloudinary");
+  }
+
+  const data = await res.json();
+  return data.public_id as string; // ← on stocke la public_id (convention du projet)
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type TypeRessource = "regles" | "fiche" | "carte" | "bestiaire" | "scenario";
@@ -18,6 +52,7 @@ type Ressource = {
   univers: string;
   taille: string;
   url: string;
+  image?: string; // ← public_id Cloudinary (optionnelle)
 };
 
 type UniversGroupe = {
@@ -296,6 +331,67 @@ const Select = styled.select`
   &:focus { border-color: rgba(160,120,255,0.5); }
 `;
 
+// ── Upload d'image de couverture ────────────────────────────────────────────
+
+const ImageUploadZone = styled.label<{ $hasPreview: boolean }>`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  max-width: 160px;
+  margin: 0 auto;
+  border-radius: 12px;
+  border: 1.5px dashed rgba(255,255,255,${p => p.$hasPreview ? 0 : 0.18});
+  background: rgba(255,255,255,0.04);
+  color: rgba(255,255,255,0.4);
+  font-size: 0.75rem;
+  text-align: center;
+  cursor: pointer;
+  overflow: hidden;
+  position: relative;
+  transition: border-color 0.15s, background 0.15s;
+
+  &:hover {
+    border-color: rgba(160,120,255,0.5);
+    background: rgba(255,255,255,0.06);
+  }
+`;
+
+const HiddenFileInput = styled.input`
+  display: none;
+`;
+
+const PreviewImg = styled.img`
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+`;
+
+const RemovePreviewBtn = styled.button`
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: none;
+  background: rgba(0,0,0,0.6);
+  color: white;
+  font-size: 0.75rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+
+  &:hover { background: rgba(0,0,0,0.8); }
+`;
+
 const SubmitBtn = styled.button`
   width: 100%;
   padding: 0.75rem;
@@ -381,11 +477,11 @@ const UniversCount = styled.span`
 
 const Grid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 1rem;
 
   @media (max-width: 400px) {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, 1fr);
   }
 `;
 
@@ -393,48 +489,67 @@ const Card = styled.div`
   background: rgba(255,255,255,0.04);
   border: 1px solid rgba(255,255,255,0.08);
   border-radius: 14px;
-  padding: 1rem;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
-  transition: border-color 0.15s, transform 0.15s;
+  transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
 
   &:hover {
     border-color: rgba(160,120,255,0.35);
-    transform: translateY(-2px);
+    transform: translateY(-4px);
+    box-shadow: 0 12px 24px rgba(0,0,0,0.35);
   }
 
   @media (hover: none) {
-    &:hover { transform: none; }
+    &:hover { transform: none; box-shadow: none; }
   }
 `;
 
-const CardTop = styled.div`
+const CoverWrapper = styled.div`
+  position: relative;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  background: #1a1826;
+  flex-shrink: 0;
+`;
+
+const CoverPlaceholder = styled.div<{ $couleur: string }>`
+  width: 100%;
+  height: 100%;
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.5rem;
+  align-items: center;
+  justify-content: center;
+  font-size: 2.4rem;
+  background: linear-gradient(160deg, ${p => p.$couleur}33, ${p => p.$couleur}11);
 `;
 
 const TypeBadge = styled.span<{ $type: TypeRessource }>`
-  font-size: 0.72rem;
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  font-size: 0.68rem;
   font-weight: 600;
-  padding: 3px 9px;
+  padding: 3px 8px;
   border-radius: 999px;
   background: ${p => TYPE_COLORS[p.$type].bg};
   color: ${p => TYPE_COLORS[p.$type].color};
   white-space: nowrap;
+  backdrop-filter: blur(4px);
+  z-index: 2;
 `;
 
-const CardIcone = styled.span`
-  font-size: 1.2rem;
-  flex-shrink: 0;
+const CardBody = styled.div`
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 1;
 `;
 
 const CardTitre = styled.p`
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   font-weight: 600;
-  line-height: 1.35;
+  line-height: 1.3;
   color: white;
   word-break: break-word;
 `;
@@ -448,7 +563,7 @@ const CardMeta = styled.div`
 `;
 
 const CardTaille = styled.span`
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   color: rgba(255,255,255,0.35);
 `;
 
@@ -456,8 +571,8 @@ const DlBtn = styled.a`
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 0.75rem;
-  padding: 4px 10px;
+  font-size: 0.72rem;
+  padding: 4px 9px;
   border-radius: 8px;
   border: 1px solid rgba(255,255,255,0.12);
   color: rgba(255,255,255,0.6);
@@ -493,9 +608,10 @@ export default function RessourcesPage() {
   const [filtre, setFiltre] = useState<TypeRessource | "tous">("tous");
   const [recherche, setRecherche] = useState("");
 
-  // ── État panneau "Proposer une ressource" ──────────────────────────────────
   const [panelOuvert, setPanelOuvert]   = useState(false);
   const [form, setForm]                 = useState(FORM_VIDE);
+  const [imageFile, setImageFile]       = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string>("");
   const [submitting, setSubmitting]     = useState(false);
   const [message, setMessage]           = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
@@ -527,12 +643,39 @@ export default function RessourcesPage() {
 
   function ouvrirPanel() {
     setForm(FORM_VIDE);
+    setImageFile(null);
+    setImagePreview("");
     setMessage(null);
     setPanelOuvert(true);
   }
 
   function fermerPanel() {
     setPanelOuvert(false);
+  }
+
+  function handleImageChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      setMessage({ type: "err", text: "Le fichier doit être une image." });
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setMessage({ type: "err", text: "Image trop lourde (5 Mo max)." });
+      return;
+    }
+
+    setImageFile(file);
+    setImagePreview(URL.createObjectURL(file));
+    setMessage(null);
+  }
+
+  function retirerImage(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    setImageFile(null);
+    setImagePreview("");
   }
 
   async function handleSubmitProposition(e: React.FormEvent) {
@@ -544,23 +687,31 @@ export default function RessourcesPage() {
     setSubmitting(true);
     setMessage(null);
     try {
+      let imagePublicId: string | null = null;
+      if (imageFile) {
+        imagePublicId = await uploaderImageCloudinary(imageFile);
+      }
+
       await addDoc(collection(db, "propositions_ressources"), {
         ...form,
+        image: imagePublicId,
         email: user?.email || null,
         auteur: user?.displayName || null,
         createdAt: serverTimestamp(),
       });
       setMessage({ type: "ok", text: "Merci ! Votre ressource sera vérifiée par un administrateur avant publication." });
       setForm(FORM_VIDE);
+      setImageFile(null);
+      setImagePreview("");
     } catch (err) {
       console.error(err);
-      setMessage({ type: "err", text: "Erreur lors de l'envoi de la proposition." });
+      const text = err instanceof Error ? err.message : "Erreur lors de l'envoi de la proposition.";
+      setMessage({ type: "err", text });
     } finally {
       setSubmitting(false);
     }
   }
 
-  // Filtrage
   const filtrees = ressources.filter(r => {
     const matchType = filtre === "tous" || r.type === filtre;
     const matchQ = r.titre.toLowerCase().includes(recherche.toLowerCase()) ||
@@ -568,7 +719,6 @@ export default function RessourcesPage() {
     return matchType && matchQ;
   });
 
-  // Groupement par univers
   const groupes: UniversGroupe[] = Object.values(
     filtrees.reduce<Record<string, UniversGroupe>>((acc, r) => {
       if (!acc[r.univers]) acc[r.univers] = { nom: r.univers, ressources: [] };
@@ -640,36 +790,50 @@ export default function RessourcesPage() {
               <Grid>
                 {groupe.ressources.map(r => (
                   <Card key={r.id}>
-                    <CardTop>
+                    <CoverWrapper>
                       <TypeBadge $type={r.type}>
                         {TYPE_LABELS[r.type]}
                       </TypeBadge>
-                      <CardIcone aria-hidden="true">
-                        {TYPE_ICONS[r.type]}
-                      </CardIcone>
-                    </CardTop>
-
-                    <CardTitre>{r.titre}</CardTitre>
-
-                    <CardMeta>
-                      <CardTaille>{r.taille}</CardTaille>
-                      {user ? (
-                        <DlBtn
-                          href={r.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          ↓ PDF
-                        </DlBtn>
+                      {r.image ? (
+                        <Image
+                          loader={cloudinaryLoader}
+                          src={r.image}
+                          alt={r.titre}
+                          fill
+                          style={{ objectFit: "cover" }}
+                          sizes="(max-width: 400px) 50vw, 150px"
+                          unoptimized={false}
+                        />
                       ) : (
-                        <DlBtn
-                          as="button"
-                          disabled
-                        >
-                          🔒 Connectez-vous pour télécharger
-                        </DlBtn>
+                        <CoverPlaceholder $couleur={config.couleur}>
+                          {TYPE_ICONS[r.type]}
+                        </CoverPlaceholder>
                       )}
-                    </CardMeta>
+                    </CoverWrapper>
+
+                    <CardBody>
+                      <CardTitre>{r.titre}</CardTitre>
+
+                      <CardMeta>
+                        <CardTaille>{r.taille}</CardTaille>
+                        {user ? (
+                          <DlBtn
+                            href={r.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            ↓ PDF
+                          </DlBtn>
+                        ) : (
+                          <DlBtn
+                            as="button"
+                            disabled
+                          >
+                            🔒 Connectez-vous
+                          </DlBtn>
+                        )}
+                      </CardMeta>
+                    </CardBody>
                   </Card>
                 ))}
               </Grid>
@@ -678,7 +842,6 @@ export default function RessourcesPage() {
         })}
       </Content>
 
-      {/* ── Panneau "Proposer une ressource" ── */}
       {panelOuvert && (
         <PanelOverlay onClick={fermerPanel}>
           <PanelCard onClick={e => e.stopPropagation()}>
@@ -688,6 +851,29 @@ export default function RessourcesPage() {
             <FormHint>Votre proposition sera vérifiée par un administrateur avant d'être publiée.</FormHint>
 
             <form onSubmit={handleSubmitProposition}>
+              <Field>
+                <Label htmlFor="couverture-input">Couverture (image)</Label>
+                <ImageUploadZone $hasPreview={!!imagePreview} htmlFor="couverture-input">
+                  {imagePreview ? (
+                    <>
+                      <PreviewImg src={imagePreview} alt="Aperçu couverture" />
+                      <RemovePreviewBtn onClick={retirerImage} aria-label="Retirer l'image">✕</RemovePreviewBtn>
+                    </>
+                  ) : (
+                    <>
+                      <span style={{ fontSize: "1.4rem" }}>🖼️</span>
+                      <span>Ajouter une image</span>
+                    </>
+                  )}
+                </ImageUploadZone>
+                <HiddenFileInput
+                  id="couverture-input"
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageChange}
+                />
+              </Field>
+
               <Field>
                 <Label htmlFor="titre">Titre *</Label>
                 <Input

@@ -3,7 +3,16 @@ import nodemailer from "nodemailer";
 
 export async function POST(req: NextRequest) {
   try {
-    const { nom, email, eventTitle, date, time } = await req.json();
+    const {
+      nom,
+      email,
+      eventTitle,
+      date,
+      time,
+      mjNom,
+      mjContact,
+      mjContactPublic,
+    } = await req.json();
 
     if (!nom || !email || !eventTitle || !date || !time) {
       return NextResponse.json(
@@ -20,7 +29,15 @@ export async function POST(req: NextRequest) {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS,
       },
+      tls: {
+        rejectUnauthorized: false,
+      },
     });
+
+    // N'affiche le bloc MJ que si un nom est fourni ET que le MJ a explicitement
+    // accepté de rendre ses coordonnées publiques.
+    const afficherMJ = !!mjNom;
+    const afficherContactMJ = afficherMJ && mjContactPublic === true && !!mjContact;
 
     const textVersion = `Inscription confirmée !
 
@@ -30,10 +47,29 @@ Votre inscription à l'événement suivant a bien été enregistrée :
 
 ${eventTitle}
 ${date} à ${time}
+${afficherMJ ? `\nMaître de jeu : ${mjNom}` : ""}${afficherContactMJ ? `\nContact : ${mjContact}` : ""}
 
 À bientôt sur place !
 
 JDR Réunion — jdr-reunion.com`;
+
+    const mjBlockHtml = afficherMJ
+      ? `
+          <div style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding: 16px 20px; margin-bottom: 24px;">
+            <p style="color:rgba(255,255,255,0.5); font-size: 12px; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; margin: 0 0 8px;">
+              Maître de jeu
+            </p>
+            <p style="color:#fff; font-size: 14px; margin: 0 0 ${afficherContactMJ ? "6px" : "0"};">
+              🧙 ${mjNom}
+            </p>
+            ${afficherContactMJ ? `
+              <p style="color:rgba(255,255,255,0.6); font-size: 13px; margin: 0;">
+                ✉️ ${mjContact}
+              </p>
+            ` : ""}
+          </div>
+        `
+      : "";
 
     const htmlVersion = `
       <div style="background:#0d0d14; padding: 32px 16px; font-family: Arial, Helvetica, sans-serif;">
@@ -51,7 +87,7 @@ JDR Réunion — jdr-reunion.com`;
             Votre inscription à l'événement suivant a bien été enregistrée :
           </p>
 
-          <div style="background:rgba(120,80,255,0.12); border:1px solid rgba(160,120,255,0.25); border-radius:10px; padding: 18px 20px; margin-bottom: 24px;">
+          <div style="background:rgba(120,80,255,0.12); border:1px solid rgba(160,120,255,0.25); border-radius:10px; padding: 18px 20px; margin-bottom: ${afficherMJ ? "16px" : "24px"};">
             <p style="color:#fff; font-size: 16px; font-weight:bold; margin: 0 0 8px;">
               ${eventTitle}
             </p>
@@ -59,6 +95,8 @@ JDR Réunion — jdr-reunion.com`;
               📅 ${date} à ${time}
             </p>
           </div>
+
+          ${mjBlockHtml}
 
           <p style="color:rgba(255,255,255,0.7); font-size: 14px; margin: 0 0 28px;">
             À bientôt sur place !
