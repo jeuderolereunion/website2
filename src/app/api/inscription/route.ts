@@ -10,62 +10,72 @@ export async function POST(req: Request) {
     const {
       email,
       pseudo,
+      prenom,
+      nom,
       eventTitle,
       date,
       heure,
       table,
-      statut,
+      mj,
     } = body;
+
+    const nomComplet = [nom, prenom].filter(Boolean).join(" ") || pseudo;
 
     await resend.emails.send({
       from: "JDR Réunion <noreply@jdr-reunion.com>",
       to: email,
-      subject:
-        statut === "confirme"
-          ? `Confirmation d'inscription - ${eventTitle}`
-          : `Liste d'attente - ${eventTitle}`,
+      subject: `Inscription confirmée - ${eventTitle} - ${heure}`,
       html: `
-        <h2>${statut === "confirme"
-          ? "Votre inscription est confirmée !"
-          : "Vous êtes en liste d'attente"}</h2>
+      <div style="background-color:#f4f1ea;padding:32px 16px;font-family:Georgia, 'Times New Roman', serif;">
+        <div style="max-width:520px;margin:0 auto;background-color:#ffffff;border-radius:8px;overflow:hidden;border:1px solid #e2ddd0;">
 
-        <p>Bonjour <strong>${pseudo}</strong>,</p>
+          <div style="background-color:#2b2118;padding:24px 32px;text-align:center;">
+            <span style="color:#e8c77a;font-size:22px;font-weight:bold;letter-spacing:0.5px;">
+              Inscription confirmée !
+            </span>
+          </div>
 
-        <p>Merci pour votre inscription.</p>
+          <div style="padding:32px;">
+            <p style="font-size:16px;color:#2b2118;margin:0 0 20px;">
+              Bonjour <strong>${nomComplet}</strong>,
+            </p>
 
-        <table cellpadding="6">
-          <tr>
-            <td><strong>Animation :</strong></td>
-            <td>${eventTitle}</td>
-          </tr>
-          <tr>
-            <td><strong>Date :</strong></td>
-            <td>${date}</td>
-          </tr>
-          <tr>
-            <td><strong>Heure :</strong></td>
-            <td>${heure}</td>
-          </tr>
-          ${
-            table
-              ? `
-          <tr>
-            <td><strong>Table :</strong></td>
-            <td>${table}</td>
-          </tr>`
-              : ""
-          }
-        </table>
+            <p style="font-size:15px;color:#4a4038;line-height:1.6;margin:0 0 24px;">
+              Votre inscription à l'événement suivant a bien été enregistrée :
+            </p>
 
-        ${
-          statut === "confirme"
-            ? "<p>Nous avons hâte de vous accueillir !</p>"
-            : "<p>Nous vous contacterons si une place se libère.</p>"
-        }
+            <div style="background-color:#f9f6ef;border-left:4px solid #b8863b;padding:18px 20px;margin-bottom:24px;border-radius:4px;">
+              <p style="font-size:18px;color:#2b2118;font-weight:bold;margin:0 0 8px;">
+                ${eventTitle}
+              </p>
+              <p style="font-size:15px;color:#4a4038;margin:0 0 4px;">
+                📅 ${date} à ${heure}
+              </p>
+              ${
+                table
+                  ? `<p style="font-size:15px;color:#4a4038;margin:0 0 4px;">🎲 Table : ${table}</p>`
+                  : ""
+              }
+              ${
+                mj
+                  ? `<p style="font-size:15px;color:#4a4038;margin:0;">🧙 Maître de jeu : ${mj}</p>`
+                  : ""
+              }
+            </div>
 
-        <hr>
+            <p style="font-size:15px;color:#4a4038;line-height:1.6;margin:0 0 8px;">
+              À bientôt sur place !
+            </p>
+          </div>
 
-        <p>Association JDR Réunion</p>
+          <div style="background-color:#f4f1ea;padding:16px 32px;text-align:center;border-top:1px solid #e2ddd0;">
+            <p style="font-size:13px;color:#8a7f6f;margin:0;">
+              JDR Réunion — <a href="https://jdr-reunion.com" style="color:#b8863b;text-decoration:none;">jdr-reunion.re</a>
+            </p>
+          </div>
+
+        </div>
+      </div>
       `,
     });
 
