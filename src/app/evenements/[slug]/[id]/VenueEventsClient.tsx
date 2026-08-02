@@ -859,6 +859,27 @@ const [submittingManuel, setSubmittingManuel] = useState<Record<string, boolean>
         tableMjNom: table?.mjNom || null,
         createdAt: serverTimestamp(),
       });
+      try {
+  await fetch("/api/inscription", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      email: userProfile.email,
+      pseudo: userProfile.pseudo,
+      eventTitle: event.titre,
+      date: event.date,
+      heure: event.heure,
+      table: table?.mjNom
+        ? `${table.mjNom}${table.systeme ? ` - ${table.systeme}` : ""}`
+        : null,
+      statut: result.statut,
+    }),
+  });
+} catch (err) {
+  console.error("Erreur envoi email :", err);
+}
 
       if (table) {
         setTablesParEvent(prev => ({

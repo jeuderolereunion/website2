@@ -694,7 +694,7 @@ export default function MonComptePage() {
           animation: "fadeUp 0.3s ease both",
         }}
       >
-        <div style={{ height: 120, overflow: "hidden", position: "relative", background: tv("--surface2") }}>
+        <div className="insc-card-media" style={{ height: 120, overflow: "hidden", position: "relative", background: tv("--surface2") }}>
           <img
             src={img}
             alt=""
@@ -724,6 +724,7 @@ export default function MonComptePage() {
             }}
           />
           <div
+            className="insc-card-text"
             style={{
               position: "absolute",
               top: 0,
@@ -751,11 +752,16 @@ export default function MonComptePage() {
             <div
               style={{
                 fontFamily: tv("--font-d"),
-                fontSize: "1.5rem",
+                fontSize: "clamp(1.05rem, 4vw, 1.5rem)",
                 fontWeight: 700,
                 color: tv("--ink"),
                 lineHeight: 1.2,
                 marginBottom: 4,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                display: "-webkit-box",
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: "vertical",
               }}
             >
               {insc.eventTitle}
@@ -764,7 +770,7 @@ export default function MonComptePage() {
               style={{
                 fontFamily: tv("--font-b"),
                 fontStyle: "italic",
-                fontSize: "0.99rem",
+                fontSize: "0.85rem",
                 color: tv("--ink-f"),
               }}
             >
@@ -775,22 +781,24 @@ export default function MonComptePage() {
           </div>
           {info?.places !== undefined && (
             <div
+              className="insc-card-badge"
               style={{
                 position: "absolute",
-                top: 12,
-                right: 12,
-                padding: "4px 12px",
+                top: 10,
+                right: 10,
+                padding: "3px 9px",
                 borderRadius: 999,
                 background: complet
                   ? `color-mix(in srgb, ${tv("--accent2")} 15%, transparent)`
                   : `color-mix(in srgb, ${tv("--good")} 12%, transparent)`,
                 border: `1px solid ${complet ? tv("--accent2") : tv("--good")}`,
                 fontFamily: tv("--font-l"),
-                fontSize: "1.5rem",
+                fontSize: "0.72rem",
+                whiteSpace: "nowrap",
                 color: complet ? tv("--accent2") : tv("--good"),
               }}
             >
-              {info.inscrits ?? 0}/{info.places} joueurs
+              {info.inscrits ?? 0}/{info.places}
             </div>
           )}
         </div>
@@ -902,6 +910,7 @@ export default function MonComptePage() {
 
     return (
       <div
+        className="fiche-card"
         style={{
           borderRadius: tv("--r"),
           overflow: "hidden",
@@ -909,7 +918,8 @@ export default function MonComptePage() {
           marginBottom: "0.7rem",
           display: "flex",
           alignItems: "center",
-          gap: "1rem",
+          flexWrap: "wrap",
+          gap: "0.75rem",
           padding: "0.8rem 1rem",
           background: "rgba(255,255,255,0.03)",
           animation: "fadeUp 0.3s ease both",
@@ -937,12 +947,12 @@ export default function MonComptePage() {
           )}
         </div>
 
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="fiche-card-info" style={{ flex: "1 1 160px", minWidth: 0 }}>
           <p
             style={{
               fontFamily: tv("--font-d"),
               fontWeight: 700,
-              fontSize: "1.8rem",
+              fontSize: "0.95rem",
               color: tv("--ink"),
               marginBottom: "0.1rem",
               overflow: "hidden",
@@ -956,7 +966,7 @@ export default function MonComptePage() {
             style={{
               fontFamily: tv("--font-b"),
               fontStyle: "italic",
-              fontSize: "0.9rem",
+              fontSize: "0.8rem",
               color: tv("--ink-f"),
             }}
           >
@@ -964,7 +974,7 @@ export default function MonComptePage() {
           </p>
         </div>
 
-        <div style={{ display: "flex", gap: "0.5rem", flexShrink: 0 }}>
+        <div className="fiche-card-actions" style={{ display: "flex", gap: "0.5rem", flexShrink: 0, marginLeft: "auto" }}>
           <a
             href={fiche.fileUrl}
             target="_blank"
@@ -976,7 +986,7 @@ export default function MonComptePage() {
               background: `color-mix(in srgb, ${tv("--accent")} 12%, transparent)`,
               color: tv("--accent"),
               fontFamily: tv("--font-l"),
-              fontSize: "0.96rem",
+              fontSize: "0.8rem",
               textDecoration: "none",
               whiteSpace: "nowrap",
             }}
@@ -993,7 +1003,7 @@ export default function MonComptePage() {
               background: `color-mix(in srgb, ${tv("--accent2")} 6%, transparent)`,
               color: tv("--accent2"),
               fontFamily: tv("--font-l"),
-              fontSize: "0.96rem",
+              fontSize: "0.8rem",
               cursor: removing ? "not-allowed" : "pointer",
               opacity: removing ? 0.4 : 1,
               whiteSpace: "nowrap",
@@ -1113,6 +1123,7 @@ export default function MonComptePage() {
       cursor: "pointer",
       transition: "border-color 0.15s, transform 0.15s",
       animation: "fadeUp 0.3s ease both",
+      width: "100%",
     };
   }
 
@@ -1276,6 +1287,98 @@ export default function MonComptePage() {
         .holo-name { text-shadow: 0 0 12px color-mix(in srgb, var(--accent2) 50%, transparent); animation: holoFlicker 5s ease-in-out infinite; }
         .madness-name { animation: madnessPulse 4s ease-in-out infinite; }
 
+        /* ── Responsive : mobile & tablette ─────────────────────────────── */
+
+        .account-card {
+          padding: clamp(1.25rem, 4vw, 3rem) clamp(1rem, 5vw, 3.25rem) clamp(1.5rem, 4vw, 3.25rem);
+        }
+
+        .account-header-row {
+          display: flex;
+          align-items: flex-start;
+          gap: 1.4rem;
+          flex-wrap: wrap;
+        }
+
+        .account-logout-btn {
+          margin-left: auto;
+        }
+
+        .stat-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+          gap: 0.65rem;
+        }
+
+        .universe-picker {
+          display: flex;
+          gap: 8px;
+          justify-content: flex-end;
+          flex-wrap: wrap;
+        }
+
+        .tabs-bar {
+          display: flex;
+          gap: 2px;
+          overflow-x: auto;
+          -webkit-overflow-scrolling: touch;
+          scrollbar-width: thin;
+        }
+
+        @media (max-width: 640px) {
+          main.account-main {
+            padding: 5.5rem 0.6rem 3rem !important;
+          }
+          .account-header-row {
+            gap: 1rem;
+          }
+          .account-logout-btn {
+            margin-left: 0;
+            width: 100%;
+            text-align: center;
+          }
+          .account-identity {
+            min-width: 0 !important;
+            flex: 1 1 100%;
+          }
+          .insc-card-media {
+            height: 150px !important;
+          }
+          .insc-card-text {
+            max-width: 68% !important;
+            padding: 12px 14px !important;
+          }
+          .insc-card-badge {
+            top: 8px !important;
+            right: 8px !important;
+          }
+          .fiche-card-actions {
+            width: 100%;
+            margin-left: 0 !important;
+            justify-content: flex-start;
+          }
+          .fiche-card-info {
+            flex-basis: 100% !important;
+          }
+          .radar-corner,
+          .manuscript-corner,
+          .tentacle-corner,
+          .eldritch-eye,
+          .corner-bracket,
+          .crack-corner {
+            transform: scale(0.7);
+          }
+        }
+
+        @media (max-width: 400px) {
+          .stat-grid {
+            grid-template-columns: repeat(2, 1fr);
+          }
+          .universe-picker {
+            justify-content: center;
+          }
+        }
+
         @media (prefers-reduced-motion: reduce) {
           *, *::before, *::after {
             animation-duration: 0.001ms !important;
@@ -1288,6 +1391,7 @@ export default function MonComptePage() {
       <Navigation />
 
       <main
+        className="account-main"
         style={{
           ...themeVars,
           position: "relative",
@@ -1391,15 +1495,16 @@ export default function MonComptePage() {
         {/* Fiche */}
         <div style={{ position: "relative", zIndex: 1, maxWidth: 920, margin: "0 auto" }}>
           <div
+            className="account-card"
             style={{
               position: "relative",
-              padding: "clamp(1.75rem, 4vw, 3rem) clamp(1.4rem, 5vw, 3.25rem) clamp(2.25rem, 4vw, 3.25rem)",
               background: tv("--surface"),
               border: `1px solid ${tv("--edge")}`,
               borderTop: `2px solid ${tv("--accent")}`,
               borderRadius: tv("--r"),
               boxShadow: "0 8px 60px rgba(0,0,0,0.6)",
               backdropFilter: "blur(10px)",
+              overflow: "hidden",
             }}
           >
             {themeId === "cyberpunk" && (
@@ -1460,7 +1565,7 @@ export default function MonComptePage() {
             )}
 
             {/* Sélecteur d'univers */}
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginBottom: "1.1rem" }}>
+            <div className="universe-picker" style={{ marginBottom: "1.1rem" }}>
               {THEME_ORDER.map((id) => (
                 <button
                   key={id}
@@ -1509,6 +1614,7 @@ export default function MonComptePage() {
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "flex-end",
+                  flexWrap: "wrap",
                   gap: "0.6rem",
                   marginBottom: "1.1rem",
                   marginTop: "-0.4rem",
@@ -1575,11 +1681,8 @@ export default function MonComptePage() {
             </p>
 
             <div
+              className="account-header-row"
               style={{
-                display: "flex",
-                alignItems: "flex-start",
-                gap: "1.4rem",
-                flexWrap: "wrap",
                 marginBottom: "1.5rem",
                 paddingBottom: "1.4rem",
                 borderBottom: `1px solid ${tv("--line")}`,
@@ -1705,7 +1808,7 @@ export default function MonComptePage() {
               </div>
 
               {/* Identité */}
-              <div style={{ flex: 1, minWidth: 220 }}>
+              <div className="account-identity" style={{ flex: 1, minWidth: 220 }}>
                 <h1
                   data-text={displayName}
                   className={
@@ -1725,6 +1828,7 @@ export default function MonComptePage() {
                     letterSpacing: "0.02em",
                     marginBottom: "0.2rem",
                     lineHeight: 1.2,
+                    overflowWrap: "anywhere",
                   }}
                 >
                   {displayName}
@@ -1737,6 +1841,7 @@ export default function MonComptePage() {
                     fontSize: "0.88rem",
                     color: tv("--ink-f"),
                     marginBottom: "0.7rem",
+                    overflowWrap: "anywhere",
                   }}
                 >
                   {profile?.email}
@@ -1813,8 +1918,8 @@ export default function MonComptePage() {
 
               <button
                 onClick={handleLogout}
+                className="account-logout-btn"
                 style={{
-                  marginLeft: "auto",
                   padding: "0.5rem 1rem",
                   borderRadius: tv("--r"),
                   border: `1px solid ${tv("--edge")}`,
@@ -1841,14 +1946,7 @@ export default function MonComptePage() {
             </div>
 
             {/* Cartes de résumé */}
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-                gap: "0.75rem",
-                marginBottom: "1.6rem",
-              }}
-            >
+            <div className="stat-grid" style={{ marginBottom: "1.6rem" }}>
               <button
                 onClick={() => setActiveTab("inscriptions")}
                 style={statCardStyle(false)}
@@ -1898,12 +1996,10 @@ export default function MonComptePage() {
 
             {/* Onglets */}
             <div
+              className="tabs-bar"
               style={{
-                display: "flex",
-                gap: 2,
                 marginBottom: "1.6rem",
                 borderBottom: `1px solid ${tv("--edge")}`,
-                overflowX: "auto",
               }}
             >
               {TABS.filter((t) => t.show).map((t) => {
@@ -2045,6 +2141,9 @@ export default function MonComptePage() {
                                     fontSize: "0.95rem",
                                     fontWeight: 700,
                                     color: tv("--ink"),
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                    whiteSpace: "nowrap",
                                   }}
                                 >
                                   {event.titre}
@@ -2203,9 +2302,12 @@ export default function MonComptePage() {
                               style={{
                                 fontFamily: tv("--font-b"),
                                 fontWeight: 600,
-                                fontSize: "2rem",
+                                fontSize: "0.98rem",
                                 color: tv("--ink"),
                                 marginBottom: "0.2rem",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
                               }}
                             >
                               {event.titre}
@@ -2214,7 +2316,7 @@ export default function MonComptePage() {
                               style={{
                                 fontFamily: tv("--font-b"),
                                 fontStyle: "italic",
-                                fontSize: "0.9rem",
+                                fontSize: "0.85rem",
                                 color: tv("--ink-f"),
                               }}
                             >
@@ -2224,7 +2326,7 @@ export default function MonComptePage() {
                           <span
                             style={{
                               fontFamily: tv("--font-b"),
-                              fontSize: "0.99rem",
+                              fontSize: "0.82rem",
                               fontWeight: 600,
                               color: shade("--accent2"),
                               background: `color-mix(in srgb, ${tv("--accent2")} 15%, transparent)`,
@@ -2296,6 +2398,9 @@ export default function MonComptePage() {
                                       fontSize: "0.88rem",
                                       fontWeight: 600,
                                       color: tv("--ink"),
+                                      overflow: "hidden",
+                                      textOverflow: "ellipsis",
+                                      whiteSpace: "nowrap",
                                     }}
                                   >
                                     {p.pseudo || p.nom}
@@ -2306,6 +2411,9 @@ export default function MonComptePage() {
                                       fontStyle: "italic",
                                       fontSize: "0.76rem",
                                       color: tv("--ink-f"),
+                                      overflow: "hidden",
+                                      textOverflow: "ellipsis",
+                                      whiteSpace: "nowrap",
                                     }}
                                   >
                                     {p.email}
@@ -2325,6 +2433,7 @@ export default function MonComptePage() {
                                     cursor: removingId === p.id ? "not-allowed" : "pointer",
                                     opacity: removingId === p.id ? 0.4 : 1,
                                     whiteSpace: "nowrap",
+                                    flexShrink: 0,
                                   }}
                                 >
                                   {removingId === p.id ? "…" : vocab.removeLabel}
@@ -2458,7 +2567,7 @@ const statValueStyle: CSSProperties = {
 
 const statLabelStyle: CSSProperties = {
   fontFamily: "var(--font-b)",
-  fontSize: "1.5rem",
+  fontSize: "0.72rem",
   color: "var(--ink-f)",
   fontWeight: 600,
 };
