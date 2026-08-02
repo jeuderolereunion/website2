@@ -1225,21 +1225,23 @@ useEffect(() => {
       });
 
       if (statut === "confirme") {
-        const emailRes = await fetch("/api/inscription", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            nom:        userProfile.pseudo || userProfile.email,
-            email:      userProfile.email,
-            eventTitle: selectedEvent.titre,
-            date:       selectedEvent.date,
-            time:       selectedEvent.heure,
-          }),
-        });
-        if (!emailRes.ok) {
-          console.error("❌ Email échoué :", await emailRes.text());
-        }
-      }
+  const emailRes = await fetch("/api/inscription", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      nom:        userProfile.pseudo || userProfile.email,
+      email:      userProfile.email,
+      eventTitle: selectedEvent.titre,
+      date:       selectedEvent.date,
+      heure:      selectedEvent.heure,
+      lieu:       selectedEvent.ville ?? undefined,
+      mj:         selectedEvent.mjNom ?? undefined,
+    }),
+  });
+  if (!emailRes.ok) {
+    console.error("❌ Email échoué :", await emailRes.text());
+  }
+}
 
       setWaitlisted(statut === "attente");
       setSuccess(true);
