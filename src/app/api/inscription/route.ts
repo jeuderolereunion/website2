@@ -3,6 +3,14 @@ import { NextResponse } from "next/server";
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
+function formatDateFr(dateISO: string): string {
+  if (!dateISO) return "";
+  const [datePart] = dateISO.split("T");
+  const [y, m, d] = datePart.split("-");
+  if (!y || !m || !d) return dateISO;
+  return `${d}/${m}/${y}`;
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -15,11 +23,15 @@ export async function POST(req: Request) {
       eventTitle,
       date,
       heure,
+      lieu,
       table,
       mj,
+      mjContact,
+      telephone,
     } = body;
 
     const nomComplet = [nom, prenom].filter(Boolean).join(" ") || pseudo;
+    const dateFr = formatDateFr(date);
 
     await resend.emails.send({
       from: "JDR Réunion <noreply@jdr-reunion.com>",
@@ -49,8 +61,13 @@ export async function POST(req: Request) {
                 ${eventTitle}
               </p>
               <p style="font-size:15px;color:#4a4038;margin:0 0 4px;">
-                📅 ${date} à ${heure}
+                📅 ${dateFr} à ${heure}
               </p>
+              ${
+                lieu
+                  ? `<p style="font-size:15px;color:#4a4038;margin:0 0 4px;">📍 ${lieu}</p>`
+                  : ""
+              }
               ${
                 table
                   ? `<p style="font-size:15px;color:#4a4038;margin:0 0 4px;">🎲 Table : ${table}</p>`
@@ -61,7 +78,20 @@ export async function POST(req: Request) {
                   ? `<p style="font-size:15px;color:#4a4038;margin:0;">🧙 Maître de jeu : ${mj}</p>`
                   : ""
               }
+              ${
+                mjContact
+                  ? `<p style="font-size:14px;color:#8a7f6f;margin:4px 0 0;">✉️ Contact du MJ : ${mjContact}</p>`
+                  : ""
+              }
             </div>
+
+            ${
+              telephone
+                ? `<p style="font-size:14px;color:#8a7f6f;line-height:1.6;margin:0 0 20px;">
+                    📱 Numéro renseigné pour cette inscription : ${telephone}
+                  </p>`
+                : ""
+            }
 
             <p style="font-size:15px;color:#4a4038;line-height:1.6;margin:0 0 8px;">
               À bientôt sur place !
