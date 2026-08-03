@@ -144,8 +144,10 @@ const FORM_ANIMATION_VIDE = {
   tags: "",
   image: "",
   lieuType: "presentiel" as "presentiel" | "ligne",
-  lieu: "",              // ← remplace ville + adresse : slug choisi dans LIEUX
-  lieuDetail: "",         // reste utilisé uniquement si lieuType === "ligne"
+  lieu: "",
+  lieuVilleLibre: "",      // ← nouveau
+  lieuAdresseLibre: "",    // ← nouveau
+  lieuDetail: "",
   mjId: "",
   mjNom: "",
   recurrence: "unique" as "unique" | "hebdomadaire",
@@ -867,6 +869,8 @@ const [editGroupForm, setEditGroupForm] = useState<{
   image: string;
   lieuType: "presentiel" | "ligne";
   lieu: string;
+  lieuVilleLibre: string;     // ← nouveau
+  lieuAdresseLibre: string;   // ← nouveau
   lieuDetail: string;
   mjId: string;
   mjNom: string;
@@ -883,6 +887,8 @@ const [editGroupForm, setEditGroupForm] = useState<{
   image: "",
   lieuType: "presentiel",
   lieu: "",
+  lieuVilleLibre: "",     // ← nouveau
+  lieuAdresseLibre: "",   // ← nouveau
   lieuDetail: "",
   mjId: "",
   mjNom: "",
@@ -1043,7 +1049,7 @@ async function refuserTable(table: TableAnimee) {
     const nouvelleDate = ajouterJours(a.date, 7);
     const idDoc = a.lieu
       ? `${a.lieu}_${nouvelleDate}`
-      : `en-ligne_${nouvelleDate}_${Date.now()}`;
+      : `${a.lieuType === "ligne" ? "en-ligne" : "autre"}_${nouvelleDate}_${Date.now()}`;
 
     const docRef = doc(db, "evenements", idDoc);
     const existant = await getDoc(docRef);
@@ -1150,6 +1156,10 @@ async function modifierOccurrence(animation: AnimationPubliee, nouvelleDate: str
 
 function ouvrirEditionGroupe(groupe: AnimationPubliee[]) {
   const premiere = groupe[0];
+  // Un lieu "presentiel" sans slug fixe (a.lieu vide) signifie que c'était
+  // un lieu libre : on présélectionne "autre" et on repeuple les champs
+  // ville/adresse libres à partir des valeurs déjà enregistrées.
+  const etaitLieuLibre = (premiere.lieuType || "presentiel") === "presentiel" && !premiere.lieu;
   setEditingGroupe(groupe);
   setEditGroupForm({
     titre: premiere.titre,
@@ -1162,7 +1172,9 @@ function ouvrirEditionGroupe(groupe: AnimationPubliee[]) {
     places: premiere.places,
     image: premiere.image || "",
     lieuType: premiere.lieuType || "presentiel",
-    lieu: premiere.lieu || "",
+    lieu: etaitLieuLibre ? "autre" : (premiere.lieu || ""),
+    lieuVilleLibre: etaitLieuLibre ? (premiere.ville || "") : "",
+    lieuAdresseLibre: etaitLieuLibre ? (premiere.adresse || "") : "",
     lieuDetail: premiere.lieuDetail || "",
     mjId: premiere.mjId || "",
     mjNom: premiere.mjNom || "",
@@ -1196,8 +1208,14 @@ async function enregistrerModifGroupe() {
   const cle = premiere.recurrenceId || premiere.id;
   if (processingIds.has(cle)) return;
 
+  const estLieuLibre = editGroupForm.lieuType === "presentiel" && editGroupForm.lieu === "autre";
+
   if (editGroupForm.lieuType === "presentiel" && !editGroupForm.lieu) {
     alert("Merci de choisir un lieu.");
+    return;
+  }
+  if (estLieuLibre && !editGroupForm.lieuVilleLibre) {
+    alert("Merci de renseigner la ville du lieu libre.");
     return;
   }
 
@@ -1206,7 +1224,10 @@ async function enregistrerModifGroupe() {
   try {
     const etaitRecurrent = !!premiere.recurrenceId;
     const doitEtreRecurrent = editGroupForm.recurrence === "hebdomadaire";
-    const lieuInfo = editGroupForm.lieu ? LIEUX[editGroupForm.lieu] : undefined;
+    const lieuInfo = editGroupForm.lieu && editGroupForm.lieu !== "autre" ? LIEUX[editGroupForm.lieu] : undefined;
+    const villeFinale = estLieuLibre ? editGroupForm.lieuVilleLibre : (lieuInfo?.ville || "");
+    const adresseFinale = estLieuLibre ? editGroupForm.lieuAdresseLibre : (lieuInfo?.adresse || "");
+    const lieuSlugFinal = estLieuLibre ? "" : editGroupForm.lieu;
     const tags = editGroupForm.tags.split(",").map(t => t.trim()).filter(Boolean);
 
     // Champs communs à toutes les occurrences de la série (tout sauf la
@@ -1222,9 +1243,9 @@ async function enregistrerModifGroupe() {
       places: editGroupForm.places,
       image: editGroupForm.image || "",
       lieuType: editGroupForm.lieuType,
-      lieu: editGroupForm.lieu || "",
-      ville: lieuInfo?.ville || "",
-      adresse: lieuInfo?.adresse || "",
+      lieu: lieuSlugFinal || "",
+      ville: villeFinale,
+      adresse: adresseFinale,
       lieuDetail: editGroupForm.lieuDetail || "",
       mjId: editGroupForm.mjId || null,
       mjNom: editGroupForm.mjNom || "",
@@ -1266,9 +1287,9 @@ async function enregistrerModifGroupe() {
         courante = ajouterJours(courante, 7);
         if (!estDansLeMoisAVenir(courante)) break;
 
-        const idDoc = editGroupForm.lieu
-          ? `${editGroupForm.lieu}_${courante}`
-          : `en-ligne_${courante}_${Date.now()}`;
+         const idDoc = lieuSlugFinal
+          ? `${lieuSlugFinal}_${courante}`
+          : `${estLieuLibre ? "autre" : "en-ligne"}_${courante}_${Date.now()}`;
         const existant = await getDoc(doc(db, "evenements", idDoc));
         if (existant.exists()) continue;
 
@@ -1554,13 +1575,21 @@ async function annulerAnimation(groupe: AnimationPubliee[]) {
   async function creerAnimation(e: React.FormEvent) {
   e.preventDefault();
 
+  const estLieuLibre = formAnim.lieuType === "presentiel" && formAnim.lieu === "autre";
   const lieuRequis = formAnim.lieuType === "presentiel";
-  if (!formAnim.titre || !formAnim.date || !formAnim.heure || !formAnim.mjId || (lieuRequis && !formAnim.lieu)) {
+
+  if (
+    !formAnim.titre || !formAnim.date || !formAnim.heure || !formAnim.mjId ||
+    (lieuRequis && !formAnim.lieu) ||
+    (estLieuLibre && !formAnim.lieuVilleLibre)
+  ) {
     setMessageAnim({
       type: "err",
-      text: lieuRequis
-        ? "Merci de renseigner au moins le titre, la date, l'heure, le lieu et le MJ référent."
-        : "Merci de renseigner au moins le titre, la date, l'heure et le MJ référent.",
+      text: estLieuLibre
+        ? "Merci de renseigner au moins le titre, la date, l'heure, la ville du lieu libre et le MJ référent."
+        : lieuRequis
+          ? "Merci de renseigner au moins le titre, la date, l'heure, le lieu et le MJ référent."
+          : "Merci de renseigner au moins le titre, la date, l'heure et le MJ référent.",
     });
     return;
   }
@@ -1568,7 +1597,10 @@ async function annulerAnimation(groupe: AnimationPubliee[]) {
   setMessageAnim(null);
   try {
     const tags = formAnim.tags.split(",").map(t => t.trim()).filter(Boolean);
-    const lieuInfo = formAnim.lieu ? LIEUX[formAnim.lieu] : undefined;
+    const lieuInfo = formAnim.lieu && formAnim.lieu !== "autre" ? LIEUX[formAnim.lieu] : undefined;
+    const villeFinale = estLieuLibre ? formAnim.lieuVilleLibre : (lieuInfo?.ville || "");
+    const adresseFinale = estLieuLibre ? formAnim.lieuAdresseLibre : (lieuInfo?.adresse || "");
+    const lieuSlugFinal = estLieuLibre ? "" : formAnim.lieu;
 
     // ── Calcul des dates à créer ──────────────────────────────────────────
     const dates: string[] = [formAnim.date];
@@ -1589,19 +1621,18 @@ async function annulerAnimation(groupe: AnimationPubliee[]) {
     const datesIgnorees: string[] = [];
 
     for (const dateOcc of dates) {
-      // ── ID déterministe : {lieu}_{date}, ou {aleatoire}_{date} si en ligne ──
-      // Permet d'éviter les doublons (2 animations au même lieu le même
-      // jour) et de retrouver un document sans requête si on connaît déjà
-      // le lieu et la date.
-      const idDoc = formAnim.lieu
-        ? `${formAnim.lieu}_${dateOcc}`
-        : `en-ligne_${dateOcc}_${Date.now()}`;
+      // ── ID déterministe : {lieu}_{date} pour un lieu fixe (permet la
+      // dédup naturelle) ; ID aléatoire pour "en ligne" ou "lieu libre",
+      // puisqu'on ne peut pas dédupliquer sur un texte libre.
+      const idDoc = (formAnim.lieuType === "presentiel" && lieuSlugFinal)
+        ? `${lieuSlugFinal}_${dateOcc}`
+        : `${estLieuLibre ? "autre" : "en-ligne"}_${dateOcc}_${Date.now()}`;
 
       const docRef = doc(db, "evenements", idDoc);
       const existant = await getDoc(docRef);
       if (existant.exists()) {
         datesIgnorees.push(dateOcc);
-        continue; // évite d'écraser une animation déjà créée à ce lieu/cette date
+        continue;
       }
 
       const data = {
@@ -1618,9 +1649,9 @@ async function annulerAnimation(groupe: AnimationPubliee[]) {
         tags,
         image: formAnim.image,
         lieuType: formAnim.lieuType,
-        lieu: formAnim.lieu || "",           // ← slug, ex: "3brasseurs"
-        ville: lieuInfo?.ville || "",
-        adresse: lieuInfo?.adresse || "",
+        lieu: lieuSlugFinal || "",
+        ville: villeFinale,
+        adresse: adresseFinale,
         lieuDetail: formAnim.lieuDetail,
         mjId: formAnim.mjId || null,
         mjNom: formAnim.mjNom,
@@ -2080,6 +2111,7 @@ async function uploadToCloudinary(
       {Object.entries(LIEUX).map(([slug, info]) => (
         <option key={slug} value={slug}>{info.label}</option>
       ))}
+      <option value="autre">📝 Autre lieu (à préciser)</option>
     </Select>
   </Field>
 ) : (
@@ -2092,6 +2124,29 @@ async function uploadToCloudinary(
       onChange={e => setFormAnim(f => ({ ...f, lieuDetail: e.target.value }))}
     />
   </Field>
+)}
+
+{formAnim.lieuType === "presentiel" && formAnim.lieu === "autre" && (
+  <>
+    <Field>
+      <Label htmlFor="a-lieu-ville">Ville *</Label>
+      <Input
+        id="a-lieu-ville"
+        placeholder="Ex : Saint-Denis"
+        value={formAnim.lieuVilleLibre}
+        onChange={e => setFormAnim(f => ({ ...f, lieuVilleLibre: e.target.value }))}
+      />
+    </Field>
+    <Field>
+      <Label htmlFor="a-lieu-adresse">Adresse / précisions</Label>
+      <Input
+        id="a-lieu-adresse"
+        placeholder="Ex : 12 rue de la Paix"
+        value={formAnim.lieuAdresseLibre}
+        onChange={e => setFormAnim(f => ({ ...f, lieuAdresseLibre: e.target.value }))}
+      />
+    </Field>
+  </>
 )}
 
               <Field>
@@ -2417,28 +2472,50 @@ async function uploadToCloudinary(
                 </Field>
 
                 {editGroupForm.lieuType === "presentiel" ? (
-                  <Field>
-                    <Label>Lieu *</Label>
-                    <Select
-                      value={editGroupForm.lieu}
-                      onChange={e => setEditGroupForm(f => ({ ...f, lieu: e.target.value }))}
-                    >
-                      <option value="">— Choisir un lieu —</option>
-                      {Object.entries(LIEUX).map(([slug, info]) => (
-                        <option key={slug} value={slug}>{info.label}</option>
-                      ))}
-                    </Select>
-                  </Field>
-                ) : (
-                  <Field>
-                    <Label>Outil / lien</Label>
-                    <Input
-                      placeholder="Ex : Discord, Roll20…"
-                      value={editGroupForm.lieuDetail}
-                      onChange={e => setEditGroupForm(f => ({ ...f, lieuDetail: e.target.value }))}
-                    />
-                  </Field>
-                )}
+  <Field>
+    <Label>Lieu *</Label>
+    <Select
+      value={editGroupForm.lieu}
+      onChange={e => setEditGroupForm(f => ({ ...f, lieu: e.target.value }))}
+    >
+      <option value="">— Choisir un lieu —</option>
+      {Object.entries(LIEUX).map(([slug, info]) => (
+        <option key={slug} value={slug}>{info.label}</option>
+      ))}
+      <option value="autre">📝 Autre lieu (à préciser)</option>
+    </Select>
+  </Field>
+) : (
+  <Field>
+    <Label>Outil / lien</Label>
+    <Input
+      placeholder="Ex : Discord, Roll20…"
+      value={editGroupForm.lieuDetail}
+      onChange={e => setEditGroupForm(f => ({ ...f, lieuDetail: e.target.value }))}
+    />
+  </Field>
+)}
+
+{editGroupForm.lieuType === "presentiel" && editGroupForm.lieu === "autre" && (
+  <>
+    <Field>
+      <Label>Ville *</Label>
+      <Input
+        placeholder="Ex : Saint-Denis"
+        value={editGroupForm.lieuVilleLibre}
+        onChange={e => setEditGroupForm(f => ({ ...f, lieuVilleLibre: e.target.value }))}
+      />
+    </Field>
+    <Field>
+      <Label>Adresse / précisions</Label>
+      <Input
+        placeholder="Ex : 12 rue de la Paix"
+        value={editGroupForm.lieuAdresseLibre}
+        onChange={e => setEditGroupForm(f => ({ ...f, lieuAdresseLibre: e.target.value }))}
+      />
+    </Field>
+  </>
+)}
 
                 <Field>
                   <Label>MJ référent</Label>
