@@ -106,7 +106,8 @@ type InscritRow = {
   email?: string;
   telephone?: string;
   statut?: "confirme" | "attente";
-  tableMjNom?: string; // uniquement pour les animations, pour savoir à quelle table
+  tableMjNom?: string;
+  tableId?: string;   // ← ajouté : pour filtrer par table précise
 };
 
 // ─── Styled ──────────────────────────────────────────────────────────────────
@@ -1273,7 +1274,7 @@ export default function EventDetailClient({ slug, id }: { slug: string; id: stri
   const router = useRouter();
   const [deletingEvent, setDeletingEvent] = useState(false);
   const [cancellingEvent, setCancellingEvent] = useState(false);
-
+  
   // Auth
   const [user, setUser]               = useState<User | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
@@ -1410,7 +1411,16 @@ export default function EventDetailClient({ slug, id }: { slug: string; id: stri
   // un admin. Ne se déclenche que si l'un ou l'autre est confirmé.
   useEffect(() => {
     if (!event) { setLoadingInscrits(false); return; }
-    const peutVoir = isAdmin || (!!user && event.mjId === user.uid);
+
+    const estOrganisateurAnimation = !!user && event.mjId === user.uid;
+    const mesTablesIds = user ? allTables.filter(t => t.mjId === user.uid).map(t => t.id) : [];
+    const estMJDuneTable = mesTablesIds.length > 0;
+
+    // ⚠️ Élargi : un MJ qui a proposé (au moins) une table sur cette
+    // animation, même sans en être l'organisateur référent, peut désormais
+    // voir la liste des inscrits — mais uniquement ceux de SA table (voir
+    // le filtrage plus bas).
+    const peutVoir = isAdmin || estOrganisateurAnimation || estMJDuneTable;
     if (!peutVoir) { setLoadingInscrits(false); setInscritsList([]); return; }
 
     let cancelled = false;
@@ -1422,7 +1432,8 @@ export default function EventDetailClient({ slug, id }: { slug: string; id: stri
 
     source.then(snap => {
       if (cancelled) return;
-      setInscritsList(snap.docs.map(d => {
+
+      let rows: InscritRow[] = snap.docs.map(d => {
         const data = d.data() as any;
         return {
           id: d.id,
@@ -1431,16 +1442,27 @@ export default function EventDetailClient({ slug, id }: { slug: string; id: stri
           telephone: data.telephone,
           statut: data.statut,
           tableMjNom: data.tableMjNom,
+          tableId: data.tableId,
         };
-      }));
+      });
+
+      // Un MJ qui n'est ni l'organisateur référent de l'animation ni admin
+      // ne doit voir QUE les inscrits de sa/ses propre(s) table(s) — jamais
+      // les coordonnées des joueurs inscrits aux autres tables, ni celles
+      // des inscrits "sans table précise".
+      if (!isAdmin && !estOrganisateurAnimation) {
+        rows = rows.filter(r => r.tableId && mesTablesIds.includes(r.tableId));
+      }
+
+      setInscritsList(rows);
       setLoadingInscrits(false);
     }).catch(() => { if (!cancelled) setLoadingInscrits(false); });
 
     return () => { cancelled = true; };
-  }, [event, user, isAdmin, slug]);
-
+  }, [event, user, isAdmin, slug, allTables]);
   const approvedTables = allTables.filter(t => t.status === "approved");
   const myTable = user ? allTables.find(t => t.mjId === user.uid) ?? null : null;
+
   useEffect(() => {
     if (
       searchParams.get("action") === "proposer-table" &&
@@ -2055,7 +2077,8 @@ export default function EventDetailClient({ slug, id }: { slug: string; id: stri
   const canEdit         = estOrganisateur || isAdmin;
   const canDeletePhoto  = isAdmin;
   const canUploadPhoto  = estOrganisateur || isAdmin;
-
+  const suisMJDuneTable   = !!user && allTables.some(t => t.mjId === user.uid);
+const peutVoirInscrits  = canEdit || suisMJDuneTable;
   // Coordonnées du MJ à afficher publiquement sur la fiche — uniquement
   // si consentement explicite ET un contact renseigné.
   const afficherContactMJPublic = !!event.mjContactPublic && !!event.mjContact;
@@ -2395,10 +2418,12 @@ export default function EventDetailClient({ slug, id }: { slug: string; id: stri
           </AsideCard>
 
           {/* Liste des inscrits — réservée à l'organisateur / admin */}
-          {canEdit && (
+          {peutVoirInscrits && (
             <AsideCard>
               <InscritsToggle onClick={() => setInscritsOpen(o => !o)}>
-                <SectionLabel style={{ margin: 0 }}>Inscrits</SectionLabel>
+                <SectionLabel style={{ margin: 0 }}>
+                  {canEdit ? "Inscrits" : "Inscrits à votre table"}
+                </SectionLabel>
                 <InscritsCount>
                   {loadingInscrits ? "…" : inscritsList.length} {inscritsOpen ? "▲" : "▼"}
                 </InscritsCount>
