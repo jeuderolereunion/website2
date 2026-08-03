@@ -23,6 +23,14 @@ export const LIEUX: Record<string, { label: string; venue: string; ville: string
     schedule: "Permanence hebdomadaire",
     image: "/images/qg-tampon.png",
   },
+  "destruction-room": {
+    label: "Destruction Room (Saint-Pierre)",
+    venue: "Destruction Room",
+    ville: "Saint-Pierre",
+    adresse: "38 Rue Désiré Barquisseau, Saint-Pierre 97410",
+    schedule: "Animation ponctuelle",
+    image: "/images/destruction-room.jpeg",
+  },
 };
 
 export function estUnLieu(id: string): boolean {

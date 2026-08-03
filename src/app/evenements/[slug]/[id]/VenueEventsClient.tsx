@@ -696,17 +696,23 @@ const [submittingManuel, setSubmittingManuel] = useState<Record<string, boolean>
   useEffect(() => {
     let cancelled = false;
     const todayISO = new Date().toISOString().split("T")[0];
+    const lieuNormalise = lieu.trim().toLowerCase();
 
     getDocs(
       query(
         collection(db, "evenements"),
-        where("categorie", "==", slug),
-        where("lieu", "==", lieu)
+        where("categorie", "==", slug)
+        // ⚠️ On ne filtre plus "lieu" côté Firestore : la comparaison stricte
+        // ("Destruction-Room" !== "destruction-room") faisait disparaître
+        // silencieusement des animations dont le champ lieu était mal casé
+        // par rapport au slug de l'URL. On filtre donc côté client, en
+        // comparant les deux en minuscules.
       )
     ).then(snap => {
       if (cancelled) return;
       const all = snap.docs.map(d => ({ id: d.id, ...d.data() })) as EventDoc[];
       const upcoming = all
+        .filter(e => (e.lieu ?? "").trim().toLowerCase() === lieuNormalise)
         .filter(e => e.date >= todayISO)
         .sort((a, b) => a.date.localeCompare(b.date));
       setEvents(upcoming);
