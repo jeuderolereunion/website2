@@ -160,6 +160,7 @@ const LIEUX: Record<string, { label: string; ville: string; adresse: string }> =
   "3brasseurs": { label: "3 Brasseurs (Saint-Paul)", ville: "Saint-Paul", adresse: "Front de mer, Saint-Paul" },
   "la-kour":    { label: "La Kour (Saint-Leu)",       ville: "Saint-Leu", adresse: "La Kour, Saint-Leu" },
   "qg-tampon":  { label: "QG association (Le Tampon)", ville: "Le Tampon", adresse: "Le Tampon" },
+  "Destruction-Room":  { label: "Destruction Room", ville: "ST PIERRE", adresse: "38 Rue Désiré Barquisseau, Saint-Pierre 97410" },
 };
 const UNIVERS_SUGGESTIONS = [
   "Donjons & Dragons",
