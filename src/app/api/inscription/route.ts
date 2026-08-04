@@ -27,6 +27,7 @@ export async function POST(req: Request) {
       table,
       mj,
       mjContact,
+      mjEmail,
       telephone,
     } = body;
 
@@ -80,7 +81,7 @@ export async function POST(req: Request) {
               }
               ${
                 mjContact
-                  ? `<p style="font-size:14px;color:#8a7f6f;margin:4px 0 0;">✉️ Contact du MJ : ${mjContact}</p>`
+                  ? `<p style="font-size:14px;color:#8a7f6f;margin:4px 0 0;">✉️ Contact du MJ : ${mjEmail}</p>`
                   : ""
               }
             </div>
@@ -100,7 +101,7 @@ export async function POST(req: Request) {
 
           <div style="background-color:#f4f1ea;padding:16px 32px;text-align:center;border-top:1px solid #e2ddd0;">
             <p style="font-size:13px;color:#8a7f6f;margin:0;">
-              JDR Réunion — <a href="https://jdr-reunion.com" style="color:#b8863b;text-decoration:none;">jdr-reunion.re</a>
+              JDR Réunion — <a href="https://jdr-reunion.com" style="color:#b8863b;text-decoration:none;">jdr-reunion.com</a>
             </p>
           </div>
 

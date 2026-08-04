@@ -19,7 +19,6 @@ import {
   query,
   where,
   onSnapshot,
-  addDoc,
   doc,
   getDoc,
   increment,
@@ -881,6 +880,8 @@ type EventDoc = {
   organisateur?: string;
   mjId?: string;
   mjNom?: string;
+  mjContact?: string;
+  mjEmail?: string
   description: string;
   categorie: string;
   systeme?: string;
@@ -1127,25 +1128,31 @@ const [mesInscriptions, setMesInscriptions] = useState<Record<string, "confirme"
 
 
   // ── Mes inscriptions (pour le badge "Inscrit" sur les cartes) ─────────────
-useEffect(() => {
-  if (!user) {
-    setMesInscriptions({});
-    return;
-  }
-  let cancelled = false;
-  getDocs(
-    query(collection(db, "inscriptions"), where("userId", "==", user.uid))
-  ).then(snap => {
-    if (cancelled) return;
-    const map: Record<string, "confirme" | "attente"> = {};
-    snap.docs.forEach(d => {
-      const data = d.data() as any;
-      if (data.eventId) map[data.eventId] = data.statut;
-    });
-    setMesInscriptions(map);
-  }).catch(() => {});
-  return () => { cancelled = true; };
-}, [user]);
+  // ⚠️ FIX : onSnapshot au lieu de getDocs → le badge "Inscrit" et le bouton
+  // "Déjà inscrit" se mettent à jour en temps réel après l'inscription,
+  // sans rechargement de la page.
+  useEffect(() => {
+    if (!user) {
+      setMesInscriptions({});
+      return;
+    }
+    const q = query(collection(db, "inscriptions"), where("userId", "==", user.uid));
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const map: Record<string, "confirme" | "attente"> = {};
+        snap.docs.forEach(d => {
+          const data = d.data();
+          if (data.eventId) map[data.eventId] = data.statut;
+        });
+        setMesInscriptions(map);
+      },
+      (error) => {
+        console.error("❌ Erreur chargement inscriptions :", error);
+      }
+    );
+    return () => unsub();
+  }, [user]);
   // ── FullCalendar events ───────────────────────────────────────────────────
 
   const fcEvents = events
@@ -1194,6 +1201,9 @@ useEffect(() => {
 
       const result: { statut: "confirme" | "attente" } = { statut: "confirme" };
 
+      // ⚠️ FIX : l'inscription est créée DANS la transaction, avec l'incrément
+      // du compteur — tout ou rien. Si l'un des deux échoue, le compteur
+      // "inscrits" ne peut plus se désynchroniser des inscriptions réelles.
       await runTransaction(db, async (transaction) => {
         const eventRef  = doc(db, "evenements", selectedEvent.id);
         const eventSnap = await transaction.get(eventRef);
@@ -1201,28 +1211,29 @@ useEffect(() => {
 
         const data = eventSnap.data();
         const placesRestantes = data.places - (data.inscrits || 0);
+        const statut: "confirme" | "attente" = placesRestantes > 0 ? "confirme" : "attente";
 
         if (placesRestantes > 0) {
-          result.statut = "confirme";
           transaction.update(eventRef, { inscrits: increment(1) });
-        } else {
-          result.statut = "attente";
         }
+
+        const inscriptionRef = doc(collection(db, "inscriptions"));
+        transaction.set(inscriptionRef, {
+          eventId:    selectedEvent.id,
+          eventTitle: selectedEvent.titre,
+          categorie:  slug,
+          nom:        userProfile.pseudo || userProfile.email,
+          email:      userProfile.email,
+          pseudo:     userProfile.pseudo,
+          userId:     user.uid,
+          statut,
+          createdAt:  serverTimestamp(),
+        });
+
+        result.statut = statut;
       });
 
       const statut = result.statut;
-
-      await addDoc(collection(db, "inscriptions"), {
-        eventId:    selectedEvent.id,
-        eventTitle: selectedEvent.titre,
-        categorie:  slug,
-        nom:        userProfile.pseudo || userProfile.email,
-        email:      userProfile.email,
-        pseudo:     userProfile.pseudo,
-        userId:     user.uid,
-        statut,
-        createdAt:  serverTimestamp(),
-      });
 
       if (statut === "confirme") {
   const emailRes = await fetch("/api/inscription", {
@@ -1234,8 +1245,10 @@ useEffect(() => {
       eventTitle: selectedEvent.titre,
       date:       selectedEvent.date,
       heure:      selectedEvent.heure,
-      lieu:       selectedEvent.ville ?? undefined,
-      mj:         selectedEvent.mjNom ?? undefined,
+      lieu:       selectedEvent.ville,
+      mj:         selectedEvent.mjNom,
+      mjContact: selectedEvent.mjContact,
+      mjEmail: selectedEvent.mjEmail,
     }),
   });
   if (!emailRes.ok) {
