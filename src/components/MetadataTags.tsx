@@ -54,10 +54,7 @@ export default function MetadataTags() {
       {data.authors.map(({ name, url: authorUrl }, index) => (
         <meta key={index} name="author" content={name} {...(authorUrl && { href: authorUrl })} />
       ))}
-      <meta
-        name="viewport"
-        content="minimum-scale=1, initial-scale=1, width=device-width, shrink-to-fit=no, viewport-fit=cover"
-      />
+      
 
       <meta property="og:type" content="website" />
       <meta property="og:url" content={siteUrl} />
