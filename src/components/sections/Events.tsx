@@ -309,6 +309,8 @@ const Card = styled(Link)`
     min-height: 110px;
     padding: 0.85rem;
   }
+
+  
 `;
 
 const CardImage = styled.div<{ $image: string }>`
