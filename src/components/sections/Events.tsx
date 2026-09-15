@@ -53,12 +53,12 @@ const Title = styled.h2`
 /* ---------- HERO : l'actu du moment ---------- */
 
 const Hero = styled(Link)`
-   position: relative;
+  position: relative;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
   align-items: flex-start;
-  min-width: 0;   /* ajouté */
+  min-width: 0;
 
   min-height: 340px;
   padding: 2.5rem;
@@ -76,22 +76,22 @@ const Hero = styled(Link)`
   border: 1px solid rgba(212, 168, 83, 0.35);
 
   @media (max-width: 768px) {
-    min-height: 250px;
-    padding: 1.4rem;
+    min-height: 200px;
+    padding: 1rem;
     border-radius: 14px;
-    margin-bottom: 1rem;
+    margin-bottom: 0.75rem;
   }
 
   @media (max-width: 480px) {
-    min-height: 210px;
-    padding: 1rem;
+    min-height: 150px;
+    padding: 0.75rem;
     border-radius: 11px;
-    margin-bottom: 0.8rem;
+    margin-bottom: 0.6rem;
   }
 
   @media (max-width: 360px) {
-    min-height: 195px;
-    padding: 0.85rem;
+    min-height: 130px;
+    padding: 0.6rem;
   }
 `;
 const HeroImage = styled.div<{ $image: string }>`
@@ -270,12 +270,12 @@ const Grid = styled.div`
 `;
 
 const Card = styled(Link)`
-position: relative;
+  position: relative;
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: flex-start;
-  min-width: 0;   /* ajouté */
+  min-width: 0;
   min-height: 240px;
   padding: 1.75rem;
   border-radius: 14px;
@@ -299,10 +299,15 @@ position: relative;
     transform: scale(0.99);
   }
 
-  @media (max-width: 640px) {
-    min-height: 190px;
-    padding: 1.25rem;
+  @media (max-width: 768px) {
+    min-height: 140px;
+    padding: 1rem;
     border-radius: 10px;
+  }
+
+  @media (max-width: 480px) {
+    min-height: 110px;
+    padding: 0.85rem;
   }
 `;
 

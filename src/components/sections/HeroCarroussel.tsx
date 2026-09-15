@@ -37,31 +37,25 @@ const SWIPE_THRESHOLD = 50;
 const Hero = styled.section`
   position: relative;
   width: 100%;
-  height: 900px;
+  aspect-ratio: 16 / 9;
+  min-height: 280px;
+  max-height: 900px;
   overflow: hidden;
   border-radius: 20px;
-  /* Empêche le navigateur d'intercepter le geste horizontal pour scroller
-     la page (le swipe doit rester dédié au changement de slide). */
   touch-action: pan-y;
 
-  @media (max-width: 1980px) {
-    height: 900px;
-    border-radius: 14px;
-  }
-
   @media (max-width: 1024px) {
-    height: 760px;
     border-radius: 14px;
   }
 
   @media (max-width: 768px) {
-    height: 480px;
     border-radius: 10px;
+    aspect-ratio: 4 / 3; /* format plus vertical sur mobile, meilleur pour du contain */
   }
 
   @media (max-width: 400px) {
-    height: 420px;
     border-radius: 8px;
+    min-height: 260px;
   }
 `;
 
@@ -70,14 +64,25 @@ const Slide = styled.div<{ $image: string; $active: boolean }>`
   inset: 0;
   opacity: ${(p) => (p.$active ? 1 : 0)};
   transition: opacity 0.8s ease;
-  background:
-    linear-gradient(
-      rgba(0, 0, 0, 0.35),
-      rgba(0, 0, 0, 0.8)
-    ),
-    url(${(p) => p.$image});
-  background-size: cover;
+
+  background-color: #08080c; /* comble les bandes letterbox, cohérent avec ton thème */
+  background-repeat: no-repeat;
   background-position: center;
+  background-size: contain; /* ← l'image entière, plus de crop */
+
+  /* le dégradé texte est appliqué séparément maintenant, voir overlay ci-dessous */
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      rgba(0, 0, 0, 0.15),
+      rgba(0, 0, 0, 0.75)
+    );
+    pointer-events: none;
+  }
+
+  background-image: url(${(p) => p.$image});
 `;
 
 const Content = styled.div`
