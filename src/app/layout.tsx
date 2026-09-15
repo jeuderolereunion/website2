@@ -1,16 +1,11 @@
 import React from "react";
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { config } from "@fortawesome/fontawesome-svg-core";
 
 import MetadataTags, { metadata as appMetadata } from "@/components/MetadataTags";
 import StyledComponentsRegistry from "@/lib/styled-components.registry";
 import { fonts } from "@/fonts";
-import type { Viewport } from "next";
 
-export const viewport: Viewport = {
-  width: "device-width",
-  initialScale: 1,
-};
 import "@fortawesome/fontawesome-svg-core/styles.css";
 import "@/styles/reset.css";
 import "@/styles/globals.scss";
@@ -18,6 +13,11 @@ import "@/styles/globals.scss";
 config.autoAddCss = false;
 
 export const metadata: Metadata = appMetadata;
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+};
 
 export default function RootLayout({
   children,
