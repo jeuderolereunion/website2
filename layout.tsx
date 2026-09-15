@@ -5,7 +5,6 @@ import { config } from "@fortawesome/fontawesome-svg-core";
 import MetadataTags, { metadata as appMetadata } from "@/components/MetadataTags";
 import StyledComponentsRegistry from "@/lib/styled-components.registry";
 import { fonts } from "@/fonts";
-
 import "@fortawesome/fontawesome-svg-core/styles.css";
 import "@/styles/reset.css";
 import "@/styles/globals.scss";

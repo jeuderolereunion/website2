@@ -4,7 +4,7 @@ export const LIEUX: Record<string, { label: string; venue: string; ville: string
     venue: "3 Brasseurs",
     ville: "Saint-Paul",
     adresse: "Front de mer, Saint-Paul",
-    schedule: "Tous les dimanches",
+    schedule: "Prmeier dimanche du mois ",
     image: "/images/3-brasseurs.jpeg",
   },
   "la-kour": {
@@ -15,20 +15,12 @@ export const LIEUX: Record<string, { label: string; venue: string; ville: string
     schedule: "Tous les mercredis soirs",
     image: "/images/laKourcaferoliste.png",
   },
-  "qg-tampon": {
-    label: "QG association (Le Tampon)",
-    venue: "Local JDR Réunion",
-    ville: "Le Tampon",
-    adresse: "Le Tampon",
-    schedule: "Permanence hebdomadaire",
-    image: "/images/qg-tampon.png",
-  },
   "destruction-room": {
     label: "Destruction Room (Saint-Pierre)",
     venue: "Destruction Room",
     ville: "Saint-Pierre",
     adresse: "38 Rue Désiré Barquisseau, Saint-Pierre 97410",
-    schedule: "Animation ponctuelle",
+    schedule: "Une fosi par mois",
     image: "/images/destruction-room.jpeg",
   },
 };

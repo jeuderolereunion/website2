@@ -10,6 +10,8 @@ import {
   addDoc, runTransaction, increment, serverTimestamp,
 } from "firebase/firestore";
 import Navigation from "@/components/Navigation";
+import { uploadToCloudinary } from "@/lib/cloudinaryLoader";
+import { SYSTEMES } from "@/lib/systemes";
 
 type EventDoc = {
   id: string;
@@ -45,6 +47,10 @@ type TableMJ = {
   placesMax: number;
   inscrits: number;
   status: "pending" | "approved" | "rejected";
+  image?: string;                              // ← nouveau : visuel de la table
+  duree?: string;                               // ← nouveau : durée estimée
+  personnages?: "pretires" | "creation";         // ← nouveau
+  ageTag?: "tous" | "16" | "18";                 // ← nouveau
 };
 
 type VenueInfo = { venue: string; ville: string; adresse: string; schedule: string; image?: string };
@@ -366,6 +372,9 @@ const TableMjLabel = styled.p`
   font-weight: 700;
   color: #c8a8ff;
   margin: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
 `;
 
 const TableDesc = styled.p`
@@ -373,6 +382,23 @@ const TableDesc = styled.p`
   color: rgba(255,255,255,0.5);
   margin: 0.25rem 0 0;
   line-height: 1.4;
+`;
+
+const TableMetaRow = styled.p`
+  font-size: 0.72rem;
+  color: rgba(255,255,255,0.4);
+  margin: 0.35rem 0 0;
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+`;
+
+const TableThumb = styled.img`
+  width: 46px;
+  height: 46px;
+  border-radius: 8px;
+  object-fit: cover;
+  flex-shrink: 0;
 `;
 
 const SmallBtn = styled.button`
@@ -446,6 +472,8 @@ const FieldLabel = styled.label`
   text-transform: uppercase;
   color: rgba(255,255,255,0.4);
   margin-bottom: 0.35rem;
+  display: flex;
+  align-items: center;
 `;
 
 const Input = styled.input`
@@ -506,6 +534,107 @@ const SubmitTableBtn = styled.button`
   cursor: pointer;
   &:hover:not(:disabled) { background: rgba(0,188,212,0.3); }
   &:disabled { opacity: 0.4; cursor: not-allowed; }
+`;
+
+// ── Image de la table (dropzone) + tags/toggles inline ────────────────────
+
+const FileDropZone = styled.label`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 110px;
+  border: 1.5px dashed rgba(255,255,255,0.2);
+  border-radius: 10px;
+  background: rgba(255,255,255,0.03);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  overflow: hidden;
+  position: relative;
+
+  &:hover {
+    border-color: rgba(0,188,212,0.5);
+    background: rgba(0,188,212,0.06);
+  }
+
+  input { display: none; }
+`;
+
+const PreviewImg = styled.img`
+  width: 100%;
+  height: 100%;
+  max-height: 180px;
+  object-fit: cover;
+`;
+
+const RemoveImgBtn = styled.button`
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  background: rgba(0,0,0,0.6);
+  border: none;
+  color: white;
+  border-radius: 6px;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.72rem;
+  cursor: pointer;
+  z-index: 2;
+  &:hover { background: rgba(0,0,0,0.8); }
+`;
+
+const FileHint = styled.span`
+  font-size: 0.78rem;
+  color: rgba(255,255,255,0.4);
+  text-align: center;
+  padding: 0 1rem;
+`;
+
+const UploadProgress = styled.p`
+  font-size: 0.75rem;
+  color: rgba(0,188,212,0.9);
+  margin: 0.3rem 0 0;
+`;
+
+const TypeBtnInline = styled.button<{ $active: boolean }>`
+  flex: 1;
+  padding: 0.5rem;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 150ms;
+  border: 1px solid ${p => p.$active ? "rgba(0,188,212,0.6)" : "rgba(255,255,255,0.12)"};
+  background: ${p => p.$active ? "rgba(0,188,212,0.15)" : "rgba(255,255,255,0.04)"};
+  color: ${p => p.$active ? "#4dd0e1" : "rgba(255,255,255,0.5)"};
+
+  &:hover {
+    border-color: rgba(0,188,212,0.5);
+    color: #4dd0e1;
+  }
+`;
+
+const AgeTag = styled.span<{ $level: "tous" | "16" | "18" }>`
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  margin-left: 0.4rem;
+  background: ${p =>
+    p.$level === "18" ? "rgba(255,80,80,0.15)"
+    : p.$level === "16" ? "rgba(255,180,60,0.15)"
+    : "rgba(120,255,160,0.12)"};
+  color: ${p =>
+    p.$level === "18" ? "#ff9a9a"
+    : p.$level === "16" ? "#ffcf8a"
+    : "#9affc0"};
+  border: 1px solid ${p =>
+    p.$level === "18" ? "rgba(255,80,80,0.35)"
+    : p.$level === "16" ? "rgba(255,180,60,0.35)"
+    : "rgba(120,255,160,0.3)"};
 `;
 
 const Empty = styled.div`
@@ -636,7 +765,15 @@ function getPlacesLevel(dispo: number): "ok" | "low" | "full" {
   return "ok";
 }
 
-const TABLE_FORM_VIDE = { systeme: "", description: "", placesMax: 4 };
+const TABLE_FORM_VIDE = {
+  systeme: "",
+  systemeAutre: "",
+  description: "",
+  placesMax: 4,
+  duree: "2-3h",
+  personnages: "pretires" as "pretires" | "creation",
+  ageTag: "tous" as "tous" | "16" | "18",
+};
 
 // ─── Composant ────────────────────────────────────────────────────────────────
 
@@ -666,6 +803,12 @@ const [loadingInscriptions, setLoadingInscriptions] = useState<Record<string, bo
   const [tableFormOpen, setTableFormOpen] = useState<Record<string, boolean>>({});
   const [tableForm, setTableForm] = useState<Record<string, typeof TABLE_FORM_VIDE>>({});
   const [submittingTable, setSubmittingTable] = useState<Record<string, boolean>>({});
+
+  // Image de la table, par événement (clé = eventId)
+  const [tableImageFile, setTableImageFile] = useState<Record<string, File | null>>({});
+  const [tableImagePreview, setTableImagePreview] = useState<Record<string, string | null>>({});
+  const [uploadingTableImage, setUploadingTableImage] = useState<Record<string, boolean>>({});
+
   const MANUAL_FORM_VIDE = { prenom: "", nom: "", nombrePlaces: 1, tableId: "" };
 
 const [manualFormOpen, setManualFormOpen] = useState<Record<string, boolean>>({});
@@ -925,45 +1068,71 @@ const [submittingManuel, setSubmittingManuel] = useState<Record<string, boolean>
     setTableFormOpen(prev => ({ ...prev, [eventId]: false }));
   }
 
+  function handleTableImageChange(eventId: string, e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { alert("Le fichier doit être une image."); return; }
+    if (file.size > 15 * 1024 * 1024)   { alert("L'image ne doit pas dépasser 15 Mo."); return; }
+    setTableImageFile(prev => ({ ...prev, [eventId]: file }));
+    setTableImagePreview(prev => ({ ...prev, [eventId]: URL.createObjectURL(file) }));
+  }
+
+  function handleRemoveTableImage(eventId: string, e: React.MouseEvent) {
+    e.preventDefault();
+    setTableImageFile(prev => ({ ...prev, [eventId]: null }));
+    setTableImagePreview(prev => ({ ...prev, [eventId]: null }));
+  }
+
   async function proposerTable(eventId: string) {
     if (!user || !userProfile) return;
     const form = tableForm[eventId];
-    if (!form || !form.systeme || !form.description) {
+    if (!form) return;
+
+    const systemeLabel = form.systeme === "Autre" ? form.systemeAutre : form.systeme;
+    if (!systemeLabel || !form.description) {
       alert("Merci de renseigner le système et la description de la table.");
       return;
     }
+
     setSubmittingTable(prev => ({ ...prev, [eventId]: true }));
     try {
-      const docRef = await addDoc(collection(db, "evenements", eventId, "tables"), {
+      let imageUrl = "";
+      const file = tableImageFile[eventId];
+      if (file) {
+        setUploadingTableImage(prev => ({ ...prev, [eventId]: true }));
+        try {
+          imageUrl = await uploadToCloudinary(file);
+        } finally {
+          setUploadingTableImage(prev => ({ ...prev, [eventId]: false }));
+        }
+      }
+
+      const nouvelleTable = {
         mjId: user.uid,
         mjNom: userProfile.pseudo || userProfile.email,
-        systeme: form.systeme,
+        systeme: systemeLabel,
         description: form.description,
         placesMax: Number(form.placesMax) || 1,
         inscrits: 0,
-        status: "pending",
+        status: "pending" as const,
+        image: imageUrl,
+        duree: form.duree,
+        personnages: form.personnages,
+        ageTag: form.ageTag,
         createdAt: serverTimestamp(),
-      });
+      };
+
+      const docRef = await addDoc(collection(db, "evenements", eventId, "tables"), nouvelleTable);
 
       setTablesParEvent(prev => ({
         ...prev,
-        [eventId]: [
-          ...(prev[eventId] ?? []),
-          {
-            id: docRef.id,
-            mjId: user.uid,
-            mjNom: userProfile.pseudo || userProfile.email,
-            systeme: form.systeme,
-            description: form.description,
-            placesMax: Number(form.placesMax) || 1,
-            inscrits: 0,
-            status: "pending",
-          },
-        ],
+        [eventId]: [...(prev[eventId] ?? []), { id: docRef.id, ...nouvelleTable }],
       }));
 
       setTableFormOpen(prev => ({ ...prev, [eventId]: false }));
       setTableForm(prev => ({ ...prev, [eventId]: { ...TABLE_FORM_VIDE } }));
+      setTableImageFile(prev => ({ ...prev, [eventId]: null }));
+      setTableImagePreview(prev => ({ ...prev, [eventId]: null }));
     } catch (err: any) {
       alert("Erreur lors de la proposition de table : " + (err.message || "inconnue"));
     } finally {
@@ -1193,11 +1362,25 @@ const inscriptionsDeCetteDate = inscriptionsParEvent[e.id] ?? [];
                                     const tableComplete = placesTableDispo <= 0;
                                     return (
                                       <TableRow key={t.id}>
+                                        {t.image && <TableThumb src={t.image} alt={t.mjNom} />}
                                         <TableInfo>
                                           <TableMjLabel>
                                             🧙 {t.mjNom}{t.systeme ? ` · ${t.systeme}` : ""}
+                                            {t.ageTag && t.ageTag !== "tous" && (
+                                              <AgeTag $level={t.ageTag}>{t.ageTag}+</AgeTag>
+                                            )}
                                           </TableMjLabel>
                                           <TableDesc>{t.description}</TableDesc>
+                                          {(t.duree || t.personnages) && (
+                                            <TableMetaRow>
+                                              {t.duree && <span>⏱ {t.duree}</span>}
+                                              {t.personnages && (
+                                                <span>
+                                                  {t.personnages === "pretires" ? "🧾 Prétirés" : "✏️ Création à la table"}
+                                                </span>
+                                              )}
+                                            </TableMetaRow>
+                                          )}
                                         </TableInfo>
                                         <SmallBtn
                                           onClick={(ev) => { ev.stopPropagation(); openRegisterModal(e, t); }}
@@ -1240,15 +1423,32 @@ const inscriptionsDeCetteDate = inscriptionsParEvent[e.id] ?? [];
                                 <TableFormBox onClick={(ev) => ev.stopPropagation()}>
                                   <div>
                                     <FieldLabel>Système / jeu</FieldLabel>
-                                    <Input
+                                    <Select
                                       value={formValues.systeme}
                                       onChange={ev => setTableForm(prev => ({
                                         ...prev,
                                         [e.id]: { ...formValues, systeme: ev.target.value },
                                       }))}
-                                      placeholder="D&D 5e, Croc, Star Wars…"
-                                    />
+                                    >
+                                      <option value="">— Choisir un système —</option>
+                                      {SYSTEMES.map(s => <option key={s} value={s}>{s}</option>)}
+                                    </Select>
                                   </div>
+
+                                  {formValues.systeme === "Autre" && (
+                                    <div>
+                                      <FieldLabel>Précisez le système</FieldLabel>
+                                      <Input
+                                        value={formValues.systemeAutre}
+                                        onChange={ev => setTableForm(prev => ({
+                                          ...prev,
+                                          [e.id]: { ...formValues, systemeAutre: ev.target.value },
+                                        }))}
+                                        placeholder="Ex: Alien RPG, Blades in the Dark..."
+                                      />
+                                    </div>
+                                  )}
+
                                   <div>
                                     <FieldLabel>Description de la table</FieldLabel>
                                     <Textarea
@@ -1260,6 +1460,31 @@ const inscriptionsDeCetteDate = inscriptionsParEvent[e.id] ?? [];
                                       placeholder="Scénario, ton de la table, ce que les joueurs peuvent attendre…"
                                     />
                                   </div>
+
+                                  <div>
+                                    <FieldLabel>Image de la table (optionnel)</FieldLabel>
+                                    <FileDropZone>
+                                      <input
+                                        type="file"
+                                        accept="image/*"
+                                        onChange={ev => handleTableImageChange(e.id, ev)}
+                                      />
+                                      {tableImagePreview[e.id] ? (
+                                        <>
+                                          <PreviewImg src={tableImagePreview[e.id]!} alt="Aperçu" />
+                                          <RemoveImgBtn onClick={(ev) => handleRemoveTableImage(e.id, ev)}>
+                                            ✕ Retirer
+                                          </RemoveImgBtn>
+                                        </>
+                                      ) : (
+                                        <FileHint>📷 Cliquez pour ajouter une image (JPG, PNG — 15 Mo max)</FileHint>
+                                      )}
+                                    </FileDropZone>
+                                    {uploadingTableImage[e.id] && (
+                                      <UploadProgress>⏳ Envoi de l'image en cours…</UploadProgress>
+                                    )}
+                                  </div>
+
                                   <div>
                                     <FieldLabel>Nombre de places max</FieldLabel>
                                     <Input
@@ -1272,15 +1497,81 @@ const inscriptionsDeCetteDate = inscriptionsParEvent[e.id] ?? [];
                                       }))}
                                     />
                                   </div>
+
+                                  <div>
+                                    <FieldLabel>Durée estimée</FieldLabel>
+                                    <Select
+                                      value={formValues.duree}
+                                      onChange={ev => setTableForm(prev => ({
+                                        ...prev,
+                                        [e.id]: { ...formValues, duree: ev.target.value },
+                                      }))}
+                                    >
+                                      <option value="1-2h">1h - 2h</option>
+                                      <option value="2-3h">2h - 3h</option>
+                                      <option value="3-4h">3h - 4h</option>
+                                      <option value="4-6h">4h - 6h</option>
+                                      <option value="journee">Journée complète</option>
+                                    </Select>
+                                  </div>
+
+                                  <FormActionsRow>
+                                    <TypeBtnInline
+                                      $active={formValues.personnages === "pretires"}
+                                      onClick={() => setTableForm(prev => ({
+                                        ...prev,
+                                        [e.id]: { ...formValues, personnages: "pretires" },
+                                      }))}
+                                    >
+                                      🧾 Prétirés fournis
+                                    </TypeBtnInline>
+                                    <TypeBtnInline
+                                      $active={formValues.personnages === "creation"}
+                                      onClick={() => setTableForm(prev => ({
+                                        ...prev,
+                                        [e.id]: { ...formValues, personnages: "creation" },
+                                      }))}
+                                    >
+                                      ✏️ Création à la table
+                                    </TypeBtnInline>
+                                  </FormActionsRow>
+
+                                  <div>
+                                    <FieldLabel>
+                                      Contenu / âge recommandé
+                                      <AgeTag $level={formValues.ageTag}>
+                                        {formValues.ageTag === "tous" ? "Tous publics" : formValues.ageTag === "16" ? "16+" : "18+"}
+                                      </AgeTag>
+                                    </FieldLabel>
+                                    <Select
+                                      value={formValues.ageTag}
+                                      onChange={ev => setTableForm(prev => ({
+                                        ...prev,
+                                        [e.id]: { ...formValues, ageTag: ev.target.value as "tous" | "16" | "18" },
+                                      }))}
+                                    >
+                                      <option value="tous">Tous publics</option>
+                                      <option value="16">16+ (thèmes matures)</option>
+                                      <option value="18">18+ (violence, horreur explicite...)</option>
+                                    </Select>
+                                  </div>
+
                                   <FormActionsRow>
                                     <CancelSmallBtn onClick={() => fermerFormulaireTable(e.id)}>
                                       Annuler
                                     </CancelSmallBtn>
                                     <SubmitTableBtn
-                                      disabled={busyTable || !formValues.systeme || !formValues.description}
+                                      disabled={
+                                        busyTable ||
+                                        !formValues.description ||
+                                        !formValues.systeme ||
+                                        (formValues.systeme === "Autre" && !formValues.systemeAutre)
+                                      }
                                       onClick={() => proposerTable(e.id)}
                                     >
-                                      {busyTable ? "Envoi…" : "Proposer la table"}
+                                      {busyTable
+                                        ? (uploadingTableImage[e.id] ? "Envoi de l'image…" : "Envoi…")
+                                        : "Proposer la table"}
                                     </SubmitTableBtn>
                                   </FormActionsRow>
                                 </TableFormBox>
@@ -1320,7 +1611,8 @@ const inscriptionsDeCetteDate = inscriptionsParEvent[e.id] ?? [];
     ) : (
       tables.map(t => (
         <ReferentItem key={t.id}>
-          <span>
+          <span style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            {t.image && <TableThumb src={t.image} alt="" />}
             🧙 {t.mjNom}{t.systeme ? ` · ${t.systeme}` : ""} · {t.inscrits}/{t.placesMax} places
           </span>
           <StatusPill $tone={t.status === "approved" ? "ok" : t.status === "rejected" ? "danger" : "warn"}>

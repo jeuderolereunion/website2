@@ -1523,9 +1523,7 @@ const filtered = events.filter(e => {
               {venuesAvecStats.map(({ lieuSlug, info, count, prochaine, jourRecurrent }) => (
                 <VenueCard key={lieuSlug} href={`/evenements/animations/${lieuSlug}`}>
                   <VenueImageHeader $bgImage={info.image}>
-                    {jourRecurrent && (
-                      <VenueRecurringTag>🔁 Chaque {jourRecurrent}</VenueRecurringTag>
-                    )}
+                    {}
                   </VenueImageHeader>
 
                   <VenueBody>
