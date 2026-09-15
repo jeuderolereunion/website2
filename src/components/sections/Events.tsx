@@ -488,28 +488,25 @@ export default function Events() {
   }, []);
 
   // Swipe
-  const handleTouchStart = (e) => {
-    touchStart.current = e.touches[0].clientX;
-  };
+  const handleTouchStart = (e: React.TouchEvent<HTMLAnchorElement>) => {
+  touchStart.current = e.touches[0].clientX;
+};
 
-  const handleTouchEnd = (e) => {
-    touchEnd.current = e.changedTouches[0].clientX;
+const handleTouchEnd = (e: React.TouchEvent<HTMLAnchorElement>) => {
+  touchEnd.current = e.changedTouches[0].clientX;
 
-    const distance = touchStart.current - touchEnd.current;
+  const distance = touchStart.current - touchEnd.current;
 
-    // Swipe suffisamment important
-    if (Math.abs(distance) > 50) {
-      if (distance > 0) {
-        // gauche
-        setCurrent((prev) => (prev + 1) % featured.length);
-      } else {
-        // droite
-        setCurrent(
-          (prev) => (prev - 1 + featured.length) % featured.length
-        );
-      }
+  if (Math.abs(distance) > 50) {
+    if (distance > 0) {
+      setCurrent((prev) => (prev + 1) % featured.length);
+    } else {
+      setCurrent((prev) => (prev - 1 + featured.length) % featured.length);
     }
-  };
+  }
+};
+
+   
 
   return (
     <Container id="events">
