@@ -45,6 +45,7 @@ export default function MetadataTags() {
   return (
     <>
       <title>{title}</title>
+      <meta name="viewport" content="width=device-width, initial-scale=1.0"></meta>
       <meta name="description" content={description} />
       <meta name="generator" content={data.generator} />
       <link rel="manifest" href={data.manifest} />

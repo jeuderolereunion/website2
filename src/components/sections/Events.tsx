@@ -270,12 +270,12 @@ const Grid = styled.div`
 `;
 
 const Card = styled(Link)`
-  position: relative;
+position: relative;
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: flex-start;
-  min-width: 0;
+  min-width: 0;   /* ajouté */
   min-height: 240px;
   padding: 1.75rem;
   border-radius: 14px;
@@ -299,18 +299,11 @@ const Card = styled(Link)`
     transform: scale(0.99);
   }
 
-  @media (max-width: 768px) {
-    min-height: 140px;
-    padding: 1rem;
+  @media (max-width: 640px) {
+    min-height: 190px;
+    padding: 1.25rem;
     border-radius: 10px;
   }
-
-  @media (max-width: 480px) {
-    min-height: 110px;
-    padding: 0.85rem;
-  }
-
-  
 `;
 
 const CardImage = styled.div<{ $image: string }>`
