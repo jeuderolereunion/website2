@@ -343,56 +343,6 @@ const GeneralRegisterText = styled.p`
   margin: 0;
 `;
 
-const TablesGrid = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-  margin-bottom: 1.1rem;
-`;
-
-const TableRow = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.8rem 1rem;
-  border-radius: 10px;
-  background: rgba(255,255,255,0.03);
-  border: 1px solid rgba(255,255,255,0.08);
-  flex-wrap: wrap;
-`;
-
-const TableInfo = styled.div`
-  flex: 1;
-  min-width: 200px;
-`;
-
-const TableMjLabel = styled.p`
-  font-size: 0.83rem;
-  font-weight: 700;
-  color: #c8a8ff;
-  margin: 0;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-`;
-
-const TableDesc = styled.p`
-  font-size: 0.78rem;
-  color: rgba(255,255,255,0.5);
-  margin: 0.25rem 0 0;
-  line-height: 1.4;
-`;
-
-const TableMetaRow = styled.p`
-  font-size: 0.72rem;
-  color: rgba(255,255,255,0.4);
-  margin: 0.35rem 0 0;
-  display: flex;
-  gap: 0.6rem;
-  flex-wrap: wrap;
-`;
-
 const TableThumb = styled.img`
   width: 46px;
   height: 46px;
@@ -420,6 +370,219 @@ const NoTablesMsg = styled.p`
   font-size: 0.8rem;
   color: rgba(255,255,255,0.35);
   margin: 0 0 1.1rem;
+`;
+
+// ── Cartes de tables (design aligné sur les cartes "Sessions JDR") ─────────
+
+const TCGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.1rem;
+`;
+
+const TCCard = styled.article`
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 14px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform 180ms ease, border-color 180ms ease, background 180ms ease;
+  animation: ${fadeUp} 0.3s ease both;
+  display: flex;
+  flex-direction: column;
+  &:hover {
+    transform: translateY(-3px);
+    background: rgba(255,255,255,0.08);
+    border-color: rgba(160,120,255,0.3);
+  }
+  @media (hover: none) {
+    &:hover { transform: none; }
+  }
+`;
+
+const TCHeader = styled.div<{ $bgImage?: string }>`
+  padding: 2.1rem 1.1rem 0.75rem;
+  background: ${p =>
+    p.$bgImage
+      ? `linear-gradient(180deg, rgba(13,13,20,0.15) 0%, rgba(13,13,20,0.88) 100%), url(${p.$bgImage})`
+      : "linear-gradient(135deg, rgba(0,188,212,0.28) 0%, rgba(0,188,212,0.06) 100%)"};
+  background-size: cover;
+  background-position: center;
+  min-height: ${p => (p.$bgImage ? "130px" : "96px")};
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  position: relative;
+`;
+
+const TCSystemeBadge = styled.span`
+  position: absolute;
+  top: 0.6rem;
+  left: 0.75rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(0,0,0,0.35);
+  color: rgba(255,255,255,0.8);
+  backdrop-filter: blur(4px);
+`;
+
+const TCStatusBadge = styled.span<{ $status: "ok" | "low" | "full" }>`
+  position: absolute;
+  top: 0.6rem;
+  right: 0.75rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: ${p =>
+    p.$status === "full" ? "rgba(255,80,80,0.2)" :
+    p.$status === "low"  ? "rgba(255,170,0,0.2)"  :
+                           "rgba(80,200,100,0.2)"};
+  border: 1px solid ${p =>
+    p.$status === "full" ? "rgba(255,80,80,0.4)" :
+    p.$status === "low"  ? "rgba(255,170,0,0.4)"  :
+                           "rgba(80,200,100,0.35)"};
+  color: ${p =>
+    p.$status === "full" ? "#ff8080" :
+    p.$status === "low"  ? "#ffbb44"  :
+                           "#7dffb3"};
+`;
+
+const TCAgeBadge = styled.span<{ $level: "tous" | "16" | "18" }>`
+  position: absolute;
+  top: 2.1rem;
+  right: 0.75rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: ${p =>
+    p.$level === "18" ? "rgba(255,80,80,0.2)"
+    : "rgba(255,180,60,0.2)"};
+  border: 1px solid ${p =>
+    p.$level === "18" ? "rgba(255,80,80,0.4)" : "rgba(255,180,60,0.4)"};
+  color: ${p => p.$level === "18" ? "#ff9a9a" : "#ffcf8a"};
+`;
+
+const TCTitle = styled.h3`
+  font-size: 1rem;
+  font-weight: 700;
+  margin: 0;
+  line-height: 1.3;
+`;
+
+const TCBody = styled.div`
+  padding: 0.85rem 1.1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+`;
+
+const TCMetaRow = styled.div`
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin: 0.4rem 0 0.6rem;
+`;
+
+const TCTag = styled.span`
+  font-size: 0.7rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.06);
+  border: 0.5px solid rgba(255,255,255,0.12);
+  color: rgba(255,255,255,0.5);
+`;
+
+const TCDesc = styled.p`
+  font-size: 0.83rem;
+  color: rgba(255,255,255,0.55);
+  margin: 0 0 0.9rem;
+  line-height: 1.55;
+  flex: 1;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+`;
+
+const TCFooter = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding-top: 0.75rem;
+  border-top: 0.5px solid rgba(255,255,255,0.08);
+  margin-top: auto;
+`;
+
+const TCMjRow = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+`;
+
+const TCMjAvatar = styled.div`
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: rgba(0,188,212,0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: #4dd0e1;
+  flex-shrink: 0;
+`;
+
+const TCMjName = styled.span`
+  font-size: 0.72rem;
+  color: rgba(255,255,255,0.4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 90px;
+`;
+
+const TCBtnGroup = styled.div`
+  display: flex;
+  gap: 0.35rem;
+  flex-shrink: 0;
+`;
+
+const TCDetailBtn = styled.button`
+  padding: 0.35rem 0.7rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  border-radius: 7px;
+  border: 1px solid rgba(255,255,255,0.15);
+  background: transparent;
+  color: rgba(255,255,255,0.5);
+  cursor: pointer;
+  transition: all 150ms;
+  white-space: nowrap;
+  &:hover { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.85); }
+`;
+
+const TCRegisterBtn = styled.button`
+  padding: 0.35rem 0.8rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  border-radius: 7px;
+  background: rgba(120,80,255,0.2);
+  border: 1px solid rgba(160,120,255,0.4);
+  color: #c8a8ff;
+  cursor: pointer;
+  transition: background 150ms, border-color 150ms;
+  white-space: nowrap;
+  &:hover { background: rgba(120,80,255,0.35); border-color: rgba(160,120,255,0.7); }
+  &:disabled { opacity: 0.4; cursor: not-allowed; }
 `;
 
 // ── Formulaire "Proposer ma table" (inline) ────────────────────────────────
@@ -692,6 +855,15 @@ const Modal = styled.div`
   max-width: 420px;
 `;
 
+const ModalImage = styled.img`
+  width: 100%;
+  height: 150px;
+  object-fit: cover;
+  border-radius: 10px;
+  margin: 0.25rem 0 1.25rem;
+  display: block;
+`;
+
 const ModalTitle = styled.h2`
   font-size: 1.15rem;
   font-weight: 700;
@@ -701,7 +873,21 @@ const ModalTitle = styled.h2`
 const ModalSub = styled.p`
   font-size: 0.85rem;
   color: rgba(255,255,255,0.5);
-  margin: 0 0 1.5rem;
+  margin: 0 0 1rem;
+`;
+
+const ModalDesc = styled.p`
+  font-size: 0.85rem;
+  color: rgba(255,255,255,0.65);
+  line-height: 1.55;
+  margin: 0 0 1.25rem;
+`;
+
+const ModalTagRow = styled.div`
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.25rem;
 `;
 
 const ModalActions = styled.div`
@@ -765,6 +951,16 @@ function getPlacesLevel(dispo: number): "ok" | "low" | "full" {
   return "ok";
 }
 
+function getInitiales(nom: string): string {
+  return nom
+    .split(" ")
+    .map(w => w[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+}
+
 const TABLE_FORM_VIDE = {
   systeme: "",
   systemeAutre: "",
@@ -798,6 +994,9 @@ const [loadingInscriptions, setLoadingInscriptions] = useState<Record<string, bo
   const [tablesParEvent, setTablesParEvent] = useState<Record<string, TableMJ[]>>({});
   const [loadingTables, setLoadingTables] = useState<Record<string, boolean>>({});
   const [mesInscriptions, setMesInscriptions] = useState<Record<string, { tableId?: string } | null>>({});
+
+  // Détail d'une table cliquée, avant confirmation d'inscription
+  const [detailTable, setDetailTable] = useState<{ event: EventDoc; table: TableMJ } | null>(null);
 
   // Formulaire "Proposer ma table", par événement (clé = eventId)
   const [tableFormOpen, setTableFormOpen] = useState<Record<string, boolean>>({});
@@ -926,6 +1125,7 @@ const [submittingManuel, setSubmittingManuel] = useState<Record<string, boolean>
       window.location.href = `/login?redirect=${encodeURIComponent(window.location.pathname)}`;
       return;
     }
+    setDetailTable(null);
     setSelected({ event, table });
   }
 
@@ -1356,43 +1556,64 @@ const inscriptionsDeCetteDate = inscriptionsParEvent[e.id] ?? [];
                               ) : tablesApprouvees.length === 0 ? (
                                 <NoTablesMsg>Aucune table proposée pour le moment.</NoTablesMsg>
                               ) : (
-                                <TablesGrid>
-                                  {tablesApprouvees.map(t => {
+                                <TCGrid>
+                                  {tablesApprouvees.map((t, i) => {
                                     const placesTableDispo = t.placesMax - (t.inscrits ?? 0);
                                     const tableComplete = placesTableDispo <= 0;
+                                    const tStatus = tableComplete ? "full" : placesTableDispo <= 2 ? "low" : "ok";
                                     return (
-                                      <TableRow key={t.id}>
-                                        {t.image && <TableThumb src={t.image} alt={t.mjNom} />}
-                                        <TableInfo>
-                                          <TableMjLabel>
-                                            🧙 {t.mjNom}{t.systeme ? ` · ${t.systeme}` : ""}
-                                            {t.ageTag && t.ageTag !== "tous" && (
-                                              <AgeTag $level={t.ageTag}>{t.ageTag}+</AgeTag>
-                                            )}
-                                          </TableMjLabel>
-                                          <TableDesc>{t.description}</TableDesc>
-                                          {(t.duree || t.personnages) && (
-                                            <TableMetaRow>
-                                              {t.duree && <span>⏱ {t.duree}</span>}
-                                              {t.personnages && (
-                                                <span>
-                                                  {t.personnages === "pretires" ? "🧾 Prétirés" : "✏️ Création à la table"}
-                                                </span>
-                                              )}
-                                            </TableMetaRow>
+                                      <TCCard
+                                        key={t.id}
+                                        style={{ animationDelay: `${i * 0.05}s` }}
+                                        onClick={() => setDetailTable({ event: e, table: t })}
+                                      >
+                                        <TCHeader $bgImage={t.image}>
+                                          {t.systeme && <TCSystemeBadge>{t.systeme}</TCSystemeBadge>}
+                                          <TCStatusBadge $status={tStatus}>
+                                            {tableComplete ? "Complet" : `${placesTableDispo} place${placesTableDispo > 1 ? "s" : ""}`}
+                                          </TCStatusBadge>
+                                          {t.ageTag && t.ageTag !== "tous" && (
+                                            <TCAgeBadge $level={t.ageTag}>{t.ageTag}+</TCAgeBadge>
                                           )}
-                                        </TableInfo>
-                                        <SmallBtn
-                                          onClick={(ev) => { ev.stopPropagation(); openRegisterModal(e, t); }}
-                                        >
-                                          {tableComplete
-                                            ? "📋 Liste d'attente"
-                                            : `✋ S'inscrire (${placesTableDispo} places)`}
-                                        </SmallBtn>
-                                      </TableRow>
+                                          <TCTitle>{t.mjNom}</TCTitle>
+                                        </TCHeader>
+
+                                        <TCBody>
+                                          <TCMetaRow>
+                                            {t.duree && <TCTag>⏱ {t.duree}</TCTag>}
+                                            {t.personnages && (
+                                              <TCTag>
+                                                {t.personnages === "pretires" ? "🧾 Prétirés" : "✏️ Création"}
+                                              </TCTag>
+                                            )}
+                                          </TCMetaRow>
+
+                                          <TCDesc>{t.description}</TCDesc>
+
+                                          <TCFooter>
+                                            <TCMjRow>
+                                              <TCMjAvatar>{getInitiales(t.mjNom)}</TCMjAvatar>
+                                              <TCMjName>{t.mjNom}</TCMjName>
+                                            </TCMjRow>
+
+                                            <TCBtnGroup>
+                                              <TCDetailBtn
+                                                onClick={(ev) => { ev.stopPropagation(); setDetailTable({ event: e, table: t }); }}
+                                              >
+                                                Détails
+                                              </TCDetailBtn>
+                                              <TCRegisterBtn
+                                                onClick={(ev) => { ev.stopPropagation(); openRegisterModal(e, t); }}
+                                              >
+                                                {tableComplete ? "Liste d'attente" : "S'inscrire"}
+                                              </TCRegisterBtn>
+                                            </TCBtnGroup>
+                                          </TCFooter>
+                                        </TCBody>
+                                      </TCCard>
                                     );
                                   })}
-                                </TablesGrid>
+                                </TCGrid>
                               )}
 
                               <GeneralRegisterBox>
@@ -1706,6 +1927,52 @@ const inscriptionsDeCetteDate = inscriptionsParEvent[e.id] ?? [];
           ))
         )}
       </Container>
+
+      {/* ── Modal détail d'une table (avant inscription) ── */}
+      {detailTable && (
+        <Overlay onClick={() => setDetailTable(null)}>
+          <Modal onClick={e => e.stopPropagation()}>
+            {detailTable.table.image && (
+              <ModalImage src={detailTable.table.image} alt={detailTable.table.mjNom} />
+            )}
+            <ModalTitle>
+              {detailTable.table.mjNom}
+              {detailTable.table.systeme ? ` · ${detailTable.table.systeme}` : ""}
+            </ModalTitle>
+            <ModalSub>
+              {formatJourComplet(detailTable.event.date)} · {detailTable.event.heure}
+            </ModalSub>
+
+            <ModalTagRow>
+              {detailTable.table.duree && <TCTag>⏱ {detailTable.table.duree}</TCTag>}
+              {detailTable.table.personnages && (
+                <TCTag>
+                  {detailTable.table.personnages === "pretires" ? "🧾 Prétirés fournis" : "✏️ Création à la table"}
+                </TCTag>
+              )}
+              {detailTable.table.ageTag && detailTable.table.ageTag !== "tous" && (
+                <TCTag>{detailTable.table.ageTag}+ ans</TCTag>
+              )}
+              <TCTag>
+                {(detailTable.table.placesMax - (detailTable.table.inscrits ?? 0)) <= 0
+                  ? "Complet"
+                  : `${detailTable.table.placesMax - (detailTable.table.inscrits ?? 0)} place${(detailTable.table.placesMax - (detailTable.table.inscrits ?? 0)) > 1 ? "s" : ""} dispo`}
+              </TCTag>
+            </ModalTagRow>
+
+            <ModalDesc>{detailTable.table.description}</ModalDesc>
+
+            <ModalActions>
+              <CancelBtn onClick={() => setDetailTable(null)}>Fermer</CancelBtn>
+              <ConfirmBtn onClick={() => openRegisterModal(detailTable.event, detailTable.table)}>
+                {(detailTable.table.placesMax - (detailTable.table.inscrits ?? 0)) <= 0
+                  ? "Rejoindre la liste d'attente"
+                  : "S'inscrire à cette table"}
+              </ConfirmBtn>
+            </ModalActions>
+          </Modal>
+        </Overlay>
+      )}
 
       {/* ── Modal inscription ── */}
       {selected && (
