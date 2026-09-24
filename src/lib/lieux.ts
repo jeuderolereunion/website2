@@ -4,7 +4,7 @@ export const LIEUX: Record<string, { label: string; venue: string; ville: string
     venue: "3 Brasseurs",
     ville: "Saint-Paul",
     adresse: "Front de mer, Saint-Paul",
-    schedule: "Prmeier dimanche du mois ",
+    schedule: "Premier dimanche du mois ",
     image: "/images/3-brasseurs.jpeg",
   },
   "la-kour": {
@@ -20,7 +20,7 @@ export const LIEUX: Record<string, { label: string; venue: string; ville: string
     venue: "Destruction Room",
     ville: "Saint-Pierre",
     adresse: "38 Rue Désiré Barquisseau, Saint-Pierre 97410",
-    schedule: "Une fosi par mois",
+    schedule: "Une fois par mois",
     image: "/images/destruction-room.jpeg",
   },
 };
