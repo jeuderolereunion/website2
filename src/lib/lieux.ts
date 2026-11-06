@@ -23,6 +23,15 @@ export const LIEUX: Record<string, { label: string; venue: string; ville: string
     schedule: "Une fois par mois",
     image: "/images/destruction-room.jpeg",
   },
+
+"guyajeux": {
+    label: "Guyajeux",
+    venue: "Guyajeux",
+    ville: "Saint-Paul",
+    adresse: "50 rue Kovil, Saint-Paul",
+    schedule: "",
+    image: "/images/guyajeux.jpg",
+  },
 };
 
 export function estUnLieu(id: string): boolean {

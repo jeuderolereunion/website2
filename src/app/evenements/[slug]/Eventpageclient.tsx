@@ -23,6 +23,8 @@ import {
   getDoc,
   increment,
   getDocs,
+  deleteDoc,
+  updateDoc,
   serverTimestamp,
 } from "firebase/firestore";
 
@@ -1042,6 +1044,10 @@ const [mesInscriptions, setMesInscriptions] = useState<Record<string, "confirme"
   const [success, setSuccess]           = useState(false);
   const [waitlisted, setWaitlisted]     = useState(false);
 
+  // Désinscription
+  const [toCancelId, setToCancelId]       = useState<string | null>(null);
+  const [submittingCancel, setSubmittingCancel] = useState(false);
+
   // Cache des noms MJ résolus depuis Firestore "users", pour les events
   // qui n'ont pas encore le champ dénormalisé mjNom.
   const [mjProfiles, setMjProfiles]     = useState<Record<string, string>>({});
@@ -1272,6 +1278,94 @@ const [mesInscriptions, setMesInscriptions] = useState<Record<string, "confirme"
     setWaitlisted(false);
   }
 
+  // ── Liste d'attente : promotion automatique quand une place se libère ─────
+
+  async function promouvoirListeAttente(eventId: string) {
+    try {
+      const snap = await getDocs(
+        query(collection(db, "inscriptions"), where("eventId", "==", eventId), where("statut", "==", "attente"))
+      );
+      const candidats = snap.docs.sort((a, b) => {
+        const ta = a.data().createdAt?.toMillis?.() ?? 0;
+        const tb = b.data().createdAt?.toMillis?.() ?? 0;
+        return ta - tb;
+      });
+      if (candidats.length === 0) return null;
+
+      const promu = candidats[0];
+      const promuData = promu.data() as any;
+
+      await updateDoc(promu.ref, { statut: "confirme" });
+
+      const eventInfo = events.find(e => e.id === eventId);
+      if (promuData.email) {
+        try {
+          await fetch("/api/inscription", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              nom:        promuData.nom || promuData.pseudo || promuData.email,
+              email:      promuData.email,
+              eventTitle: eventInfo?.titre ?? promuData.eventTitle ?? "",
+              date:       eventInfo?.date ?? "",
+              heure:      eventInfo?.heure ?? "",
+              lieu:       eventInfo?.ville ?? "",
+              mj:         eventInfo?.mjNom ?? "",
+              mjContact:  eventInfo?.mjContact ?? "",
+              mjEmail:    eventInfo?.mjEmail ?? "",
+              statut:     "confirme",
+              promotionListeAttente: true,
+            }),
+          });
+        } catch (err) {
+          console.error("❌ Erreur envoi email de promotion :", err);
+        }
+      }
+
+      return promu.id;
+    } catch (err) {
+      console.error("❌ Erreur promotion liste d'attente :", err);
+      return null;
+    }
+  }
+
+  // ── Désinscription ─────────────────────────────────────────────────────────
+
+  async function handleDesinscription(eventId: string) {
+    if (!user) return;
+    setSubmittingCancel(true);
+    try {
+      const snap = await getDocs(
+        query(collection(db, "inscriptions"), where("eventId", "==", eventId), where("userId", "==", user.uid))
+      );
+      if (snap.empty) {
+        setToCancelId(null);
+        return;
+      }
+      const inscrDoc = snap.docs[0];
+      const statut = (inscrDoc.data().statut as "confirme" | "attente") ?? "confirme";
+
+      await deleteDoc(inscrDoc.ref);
+
+      if (statut === "confirme") {
+        // On tente d'abord de faire monter quelqu'un de la liste d'attente :
+        // la place n'est alors pas vraiment "libérée", juste transférée.
+        const promuId = await promouvoirListeAttente(eventId);
+        if (!promuId) {
+          await updateDoc(doc(db, "evenements", eventId), { inscrits: increment(-1) });
+        }
+      }
+
+      // mesInscriptions et events se mettent à jour tout seuls via les
+      // écouteurs onSnapshot déjà en place — pas besoin de maj manuelle ici.
+      setToCancelId(null);
+    } catch (err: any) {
+      alert(err.message || "Une erreur est survenue lors de la désinscription.");
+    } finally {
+      setSubmittingCancel(false);
+    }
+  }
+
   // ── Rendu page inconnue ───────────────────────────────────────────────────
 
   if (!cat) {
@@ -1339,7 +1433,6 @@ const filtered = events.filter(e => {
   let registerLabel = "S'inscrire";
   if (!user)                     registerLabel = "Se connecter";
   else if (estOrganisateur)      registerLabel = "Vous organisez";
-  else if (monStatutInscription) registerLabel = "Déjà inscrit"; // ← ajouté
   else if (complet)              registerLabel = "Liste d'attente";
 
   return (
@@ -1393,15 +1486,24 @@ const filtered = events.filter(e => {
             </DetailBtn>
 
             {!isPast && (
-              <RegisterBtn
-                disabled={estOrganisateur || !!monStatutInscription} // ← ajouté
-                onClick={(e) => {
-                  e.preventDefault();
-                  handleRegisterClick(event);
-                }}
-              >
-                {registerLabel}
-              </RegisterBtn>
+              monStatutInscription ? (
+                <RegisterBtn
+                  onClick={(e) => { e.preventDefault(); setToCancelId(event.id); }}
+                  style={{ background: "rgba(255,80,80,0.15)", borderColor: "rgba(255,80,80,0.4)", color: "#ff8080" }}
+                >
+                  Se désinscrire
+                </RegisterBtn>
+              ) : (
+                <RegisterBtn
+                  disabled={estOrganisateur}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    handleRegisterClick(event);
+                  }}
+                >
+                  {registerLabel}
+                </RegisterBtn>
+              )
             )}
           </BtnGroup>
         </CardFooter>
@@ -1644,6 +1746,37 @@ const filtered = events.filter(e => {
           </Modal>
         </Overlay>
       )}
+
+      {/* ── Modal désinscription ── */}
+      {toCancelId && (() => {
+        const ev = events.find(e => e.id === toCancelId);
+        if (!ev) return null;
+        return (
+          <Overlay onClick={() => !submittingCancel && setToCancelId(null)}>
+            <Modal onClick={e => e.stopPropagation()}>
+              <ModalTitle>Se désinscrire ?</ModalTitle>
+              <ModalSubtitle>
+                {ev.titre} · {formatDateFr(ev.date)} à {ev.heure}
+              </ModalSubtitle>
+              <p style={{ fontSize: "0.85rem", color: "rgba(255,255,255,0.45)", marginBottom: "1.5rem" }}>
+                Votre place sera libérée. Vous pourrez vous réinscrire tant qu&apos;il reste de la place.
+              </p>
+              <ModalActions>
+                <CancelBtn onClick={() => setToCancelId(null)} disabled={submittingCancel}>
+                  Retour
+                </CancelBtn>
+                <ConfirmBtn
+                  onClick={() => handleDesinscription(toCancelId)}
+                  disabled={submittingCancel}
+                  style={{ background: "rgba(255,80,80,0.2)", borderColor: "rgba(255,80,80,0.5)", color: "#ff8080" }}
+                >
+                  {submittingCancel ? "…" : "Confirmer la désinscription"}
+                </ConfirmBtn>
+              </ModalActions>
+            </Modal>
+          </Overlay>
+        );
+      })()}
     </Page>
   );
 }

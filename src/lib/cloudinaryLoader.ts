@@ -12,14 +12,16 @@ if (!CLOUDINARY_CLOUD_NAME) {
 
 // ─── Upload ─────────────────────────────────────────────────────────────────
 
-// ⚠️ FIX : on lit le corps de la réponse d'erreur Cloudinary
-// (res.json().error.message) au lieu de jeter un message générique.
-// Cloudinary renvoie des messages très précis : "Upload preset not found",
-// "Invalid cloud_name", "Upload preset must be whitelisted for unsigned uploads", etc.
-export async function uploadToCloudinary(file: File): Promise<string> {
+// Lit le corps de l'erreur Cloudinary (error.message) au lieu d'un message
+// générique, et expose la progression via un callback optionnel (0 à 100).
+// XMLHttpRequest est utilisé car fetch ne mesure pas la progression d'un envoi.
+export function uploadToCloudinary(
+  file: File,
+  onProgress?: (pct: number) => void
+): Promise<string> {
   if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_UPLOAD_PRESET) {
-    throw new Error(
-      "Configuration Cloudinary manquante (variables d'environnement non définies)."
+    return Promise.reject(
+      new Error("Configuration Cloudinary manquante (variables d'environnement non définies).")
     );
   }
 
@@ -27,25 +29,29 @@ export async function uploadToCloudinary(file: File): Promise<string> {
   formData.append("file", file);
   formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
 
-  const res = await fetch(
-    `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`,
-    { method: "POST", body: formData }
-  );
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`);
 
-  if (!res.ok) {
-    let detail = `HTTP ${res.status}`;
-    try {
-      const errBody = await res.json();
-      detail = errBody?.error?.message || detail;
-    } catch {
-      // le corps n'était pas du JSON exploitable, on garde le statut HTTP
-    }
-    console.error("❌ Échec upload Cloudinary :", detail);
-    throw new Error(`Échec de l'upload de l'image : ${detail}`);
-  }
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress?.(Math.round((e.loaded / e.total) * 100));
+    };
 
-  const data = await res.json();
-  return data.secure_url as string;
+    xhr.onload = () => {
+      let body: any = null;
+      try { body = JSON.parse(xhr.responseText); } catch { /* corps non JSON */ }
+      if (xhr.status >= 200 && xhr.status < 300 && body?.secure_url) {
+        resolve(body.secure_url as string);
+      } else {
+        const detail = body?.error?.message || `HTTP ${xhr.status}`;
+        console.error("❌ Échec upload Cloudinary :", detail);
+        reject(new Error(`Échec de l'upload de l'image : ${detail}`));
+      }
+    };
+
+    xhr.onerror = () => reject(new Error("Échec de l'upload de l'image : erreur réseau"));
+    xhr.send(formData);
+  });
 }
 
 // ─── Loader next/image ──────────────────────────────────────────────────────
@@ -60,11 +66,10 @@ type CloudinaryLoaderOptions = {
  * `src` doit être la public_id Cloudinary (ex: "jdr-reunion/events/3-brasseurs"),
  * pas une URL complète.
  *
- * ⚠️ uploadToCloudinary() ci-dessus renvoie secure_url (URL complète), pas le
- * public_id. Tant que seule l'URL est stockée côté Firestore, ce loader ne
- * peut pas être branché directement dessus (Cloudinary recevrait une URL en
- * guise de src et produirait une image cassée). Utiliser extractPublicId()
- * ci-dessous pour combler l'écart, ou stocker le public_id à l'upload.
+ * ⚠️ uploadToCloudinary() renvoie secure_url (URL complète), pas le public_id.
+ * Tant que seule l'URL est stockée côté Firestore, ce loader ne peut pas être
+ * branché directement dessus. Utiliser extractPublicId() ci-dessous pour
+ * combler l'écart, ou stocker le public_id à l'upload.
  */
 export function makeCloudinaryLoader({ square = false }: CloudinaryLoaderOptions = {}) {
   return function cloudinaryLoader({ src, width, quality }: ImageLoaderProps): string {
@@ -82,11 +87,8 @@ export function makeCloudinaryLoader({ square = false }: CloudinaryLoaderOptions
 }
 
 /**
- * Extrait le public_id à partir d'une secure_url Cloudinary stockée
- * (ex: "https://res.cloudinary.com/demo/image/upload/v1234/jdr-reunion/events/3-brasseurs.jpg"
- * → "jdr-reunion/events/3-brasseurs").
- * Pont temporaire pour les documents qui n'ont que `image` (URL) et pas
- * encore de `publicId` dédié. Retourne null si le format est inattendu.
+ * Extrait le public_id à partir d'une secure_url Cloudinary stockée.
+ * Retourne null si le format est inattendu.
  */
 export function extractPublicId(url: string): string | null {
   const match = url.match(/\/upload\/(?:v\d+\/)?(.+)\.[a-zA-Z0-9]+$/);

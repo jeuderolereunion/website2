@@ -1,5 +1,6 @@
 "use client";
 
+import TableCard from "@/components/TableCard";
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import styled, { keyframes } from "styled-components";
@@ -22,9 +23,14 @@ type EventDoc = {
   places: number;
   inscrits: number;
   lieu?: string;
+  ville?: string;
   systeme?: string;
-  mjId?: string;   // ← ajouté : organisateur référent de l'animation
-  annule?: boolean; // ← ajouté : animation annulée par le MJ référent ou un admin
+  mjId?: string;    // organisateur référent de l'animation
+  annule?: boolean; // animation annulée par le MJ référent ou un admin
+  // ── Contenu affiché directement sur la carte (rempli depuis l'admin) ──────
+  accroche?: string;
+  programme?: { heure: string; titre: string }[];
+  lien?: string;    // chemin de la page de l'animation (sinon recalculé)
 };
 type InscriptionJoueur = {
   id: string;
@@ -36,8 +42,8 @@ type InscriptionJoueur = {
   statut: "confirme" | "attente";
   tableId?: string | null;
   tableMjNom?: string | null;
-  manuel?: boolean;        // ← nouveau : ajouté par un MJ, pas par le joueur lui-même
-  nombrePlaces?: number;   // ← nouveau : permet d'ajouter un groupe d'un coup
+  manuel?: boolean;        // ajouté par un MJ, pas par le joueur lui-même
+  nombrePlaces?: number;   // permet d'ajouter un groupe d'un coup
 };
 type TableMJ = {
   id: string;
@@ -48,10 +54,10 @@ type TableMJ = {
   placesMax: number;
   inscrits: number;
   status: "pending" | "approved" | "rejected";
-  image?: string;                              // ← nouveau : visuel de la table
-  duree?: string;                               // ← nouveau : durée estimée
-  personnages?: "pretires" | "creation";         // ← nouveau
-  ageTag?: "tous" | "16" | "18";                 // ← nouveau
+  image?: string;
+  duree?: string;
+  personnages?: "pretires" | "creation";
+  ageTag?: "tous" | "16" | "18";
 };
 
 type VenueInfo = { venue: string; ville: string; adresse: string; schedule: string; image?: string };
@@ -230,9 +236,10 @@ const EventCard = styled.div<{ $isNext?: boolean }>`
   transition: border-color 150ms;
 `;
 
+// position: relative → le lien « Voir les détails » s'étire sur toute cette zone
 const CardTop = styled.div`
+  position: relative;
   padding: 1.25rem 1.4rem;
-  cursor: pointer;
 `;
 
 const NextTag = styled.div`
@@ -298,12 +305,67 @@ const PlacesBadge = styled.span<{ $level: "ok" | "low" | "full" }>`
                           "rgba(80,200,120,0.3)"};
 `;
 
-const ExpandHint = styled.span`
-  font-size: 0.72rem;
-  color: rgba(160,120,255,0.8);
+// ── Contenu de la carte : titre, accroche, début du programme, accès direct ──
+
+const EventName = styled.h3`
+  margin: 0.9rem 0 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1.3;
+`;
+
+const EventPitch = styled.p`
+  margin: 0.4rem 0 0;
+  font-size: 0.85rem;
+  line-height: 1.55;
+  color: rgba(255,255,255,0.65);
+`;
+
+const EventSteps = styled.ul`
+  margin: 0.6rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.78rem;
+  color: rgba(255,255,255,0.5);
+`;
+
+const EventActions = styled.div`
   display: flex;
   align-items: center;
-  gap: 0.25rem;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+`;
+
+const DetailBtn = styled(Link)`
+  padding: 0.55rem 1rem;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #fff;
+  text-decoration: none;
+  background: rgba(120,80,255,0.35);
+  border: 1px solid rgba(160,120,255,0.6);
+  /* étire le lien sur toute la zone haute de la carte */
+  &::after { content: ""; position: absolute; inset: 0; }
+  &:hover { background: rgba(120,80,255,0.5); }
+  &:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+`;
+
+const ToggleBtn = styled.button`
+  position: relative;
+  z-index: 1;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.75rem;
+  color: rgba(160,120,255,0.9);
+  padding: 0.4rem 0.2rem;
+  &:hover { color: #c8a8ff; }
 `;
 
 const ExpandedZone = styled.div`
@@ -373,217 +435,12 @@ const NoTablesMsg = styled.p`
   margin: 0 0 1.1rem;
 `;
 
-// ── Cartes de tables (design aligné sur les cartes "Sessions JDR") ─────────
-
+// Grille des cartes de tables (le design des cartes est dans TableCard)
 const TCGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 1rem;
   margin-bottom: 1.1rem;
-`;
-
-const TCCard = styled.article`
-  background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 14px;
-  overflow: hidden;
-  cursor: pointer;
-  transition: transform 180ms ease, border-color 180ms ease, background 180ms ease;
-  animation: ${fadeUp} 0.3s ease both;
-  display: flex;
-  flex-direction: column;
-  &:hover {
-    transform: translateY(-3px);
-    background: rgba(255,255,255,0.08);
-    border-color: rgba(160,120,255,0.3);
-  }
-  @media (hover: none) {
-    &:hover { transform: none; }
-  }
-`;
-
-const TCHeader = styled.div<{ $bgImage?: string }>`
-  padding: 2.1rem 1.1rem 0.75rem;
-  background: ${p =>
-    p.$bgImage
-      ? `linear-gradient(180deg, rgba(13,13,20,0.15) 0%, rgba(13,13,20,0.88) 100%), url(${p.$bgImage})`
-      : "linear-gradient(135deg, rgba(0,188,212,0.28) 0%, rgba(0,188,212,0.06) 100%)"};
-  background-size: cover;
-  background-position: center;
-  min-height: ${p => (p.$bgImage ? "130px" : "96px")};
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  position: relative;
-`;
-
-const TCSystemeBadge = styled.span`
-  position: absolute;
-  top: 0.6rem;
-  left: 0.75rem;
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: rgba(0,0,0,0.35);
-  color: rgba(255,255,255,0.8);
-  backdrop-filter: blur(4px);
-`;
-
-const TCStatusBadge = styled.span<{ $status: "ok" | "low" | "full" }>`
-  position: absolute;
-  top: 0.6rem;
-  right: 0.75rem;
-  font-size: 0.68rem;
-  font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: ${p =>
-    p.$status === "full" ? "rgba(255,80,80,0.2)" :
-    p.$status === "low"  ? "rgba(255,170,0,0.2)"  :
-                           "rgba(80,200,100,0.2)"};
-  border: 1px solid ${p =>
-    p.$status === "full" ? "rgba(255,80,80,0.4)" :
-    p.$status === "low"  ? "rgba(255,170,0,0.4)"  :
-                           "rgba(80,200,100,0.35)"};
-  color: ${p =>
-    p.$status === "full" ? "#ff8080" :
-    p.$status === "low"  ? "#ffbb44"  :
-                           "#7dffb3"};
-`;
-
-const TCAgeBadge = styled.span<{ $level: "tous" | "16" | "18" }>`
-  position: absolute;
-  top: 2.1rem;
-  right: 0.75rem;
-  font-size: 0.65rem;
-  font-weight: 700;
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: ${p =>
-    p.$level === "18" ? "rgba(255,80,80,0.2)"
-    : "rgba(255,180,60,0.2)"};
-  border: 1px solid ${p =>
-    p.$level === "18" ? "rgba(255,80,80,0.4)" : "rgba(255,180,60,0.4)"};
-  color: ${p => p.$level === "18" ? "#ff9a9a" : "#ffcf8a"};
-`;
-
-const TCTitle = styled.h3`
-  font-size: 1rem;
-  font-weight: 700;
-  margin: 0;
-  line-height: 1.3;
-`;
-
-const TCBody = styled.div`
-  padding: 0.85rem 1.1rem 1.1rem;
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-`;
-
-const TCMetaRow = styled.div`
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-  margin: 0.4rem 0 0.6rem;
-`;
-
-const TCTag = styled.span`
-  font-size: 0.7rem;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.06);
-  border: 0.5px solid rgba(255,255,255,0.12);
-  color: rgba(255,255,255,0.5);
-`;
-
-const TCDesc = styled.p`
-  font-size: 0.83rem;
-  color: rgba(255,255,255,0.55);
-  margin: 0 0 0.9rem;
-  line-height: 1.55;
-  flex: 1;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-`;
-
-const TCFooter = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding-top: 0.75rem;
-  border-top: 0.5px solid rgba(255,255,255,0.08);
-  margin-top: auto;
-`;
-
-const TCMjRow = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  min-width: 0;
-`;
-
-const TCMjAvatar = styled.div`
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  background: rgba(0,188,212,0.3);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.6rem;
-  font-weight: 700;
-  color: #4dd0e1;
-  flex-shrink: 0;
-`;
-
-const TCMjName = styled.span`
-  font-size: 0.72rem;
-  color: rgba(255,255,255,0.4);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 90px;
-`;
-
-const TCBtnGroup = styled.div`
-  display: flex;
-  gap: 0.35rem;
-  flex-shrink: 0;
-`;
-
-const TCDetailBtn = styled.button`
-  padding: 0.35rem 0.7rem;
-  font-size: 0.72rem;
-  font-weight: 600;
-  border-radius: 7px;
-  border: 1px solid rgba(255,255,255,0.15);
-  background: transparent;
-  color: rgba(255,255,255,0.5);
-  cursor: pointer;
-  transition: all 150ms;
-  white-space: nowrap;
-  &:hover { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.85); }
-`;
-
-const TCRegisterBtn = styled.button`
-  padding: 0.35rem 0.8rem;
-  font-size: 0.72rem;
-  font-weight: 600;
-  border-radius: 7px;
-  background: rgba(120,80,255,0.2);
-  border: 1px solid rgba(160,120,255,0.4);
-  color: #c8a8ff;
-  cursor: pointer;
-  transition: background 150ms, border-color 150ms;
-  white-space: nowrap;
-  &:hover { background: rgba(120,80,255,0.35); border-color: rgba(160,120,255,0.7); }
-  &:disabled { opacity: 0.4; cursor: not-allowed; }
 `;
 
 // ── Formulaire "Proposer ma table" (inline) ────────────────────────────────
@@ -820,7 +677,7 @@ const SkeletonCard = styled.div`
   }
 `;
 
-// ── Modal inscription ──────────────────────────────────────────────────────
+// ── Modales (inscription, désinscription, annulation) ──────────────────────
 
 const Overlay = styled.div`
   position: fixed;
@@ -843,15 +700,6 @@ const Modal = styled.div`
   max-width: 420px;
 `;
 
-const ModalImage = styled.img`
-  width: 100%;
-  height: 150px;
-  object-fit: cover;
-  border-radius: 10px;
-  margin: 0.25rem 0 1.25rem;
-  display: block;
-`;
-
 const ModalTitle = styled.h2`
   font-size: 1.15rem;
   font-weight: 700;
@@ -862,20 +710,6 @@ const ModalSub = styled.p`
   font-size: 0.85rem;
   color: rgba(255,255,255,0.5);
   margin: 0 0 1rem;
-`;
-
-const ModalDesc = styled.p`
-  font-size: 0.85rem;
-  color: rgba(255,255,255,0.65);
-  line-height: 1.55;
-  margin: 0 0 1.25rem;
-`;
-
-const ModalTagRow = styled.div`
-  display: flex;
-  gap: 0.4rem;
-  flex-wrap: wrap;
-  margin-bottom: 1.25rem;
 `;
 
 const ModalActions = styled.div`
@@ -939,16 +773,6 @@ function getPlacesLevel(dispo: number): "ok" | "low" | "full" {
   return "ok";
 }
 
-function getInitiales(nom: string): string {
-  return nom
-    .split(" ")
-    .map(w => w[0])
-    .filter(Boolean)
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
-}
-
 const TABLE_FORM_VIDE = {
   systeme: "",
   systemeAutre: "",
@@ -968,10 +792,14 @@ export default function VenueEventsClient({
 }: {
   slug: string;
   lieu: string;
-  venue: VenueInfo;
+  // Optionnel : le lieu peut ne pas (encore) exister dans la collection
+  // Firestore "lieux" — ex. un slug auto-généré par un ancien formulaire
+  // ("autre_2026-10-11_..."). Dans ce cas on affiche un en-tête de repli
+  // construit à partir des événements trouvés pour ce slug.
+  venue?: VenueInfo;
 }) {
   const [inscriptionsParEvent, setInscriptionsParEvent] = useState<Record<string, InscriptionJoueur[]>>({});
-const [loadingInscriptions, setLoadingInscriptions] = useState<Record<string, boolean>>({});
+  const [loadingInscriptions, setLoadingInscriptions] = useState<Record<string, boolean>>({});
   const [events, setEvents] = useState<EventDoc[]>([]);
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<User | null>(null);
@@ -982,9 +810,6 @@ const [loadingInscriptions, setLoadingInscriptions] = useState<Record<string, bo
   const [tablesParEvent, setTablesParEvent] = useState<Record<string, TableMJ[]>>({});
   const [loadingTables, setLoadingTables] = useState<Record<string, boolean>>({});
   const [mesInscriptions, setMesInscriptions] = useState<Record<string, { tableId?: string } | null>>({});
-
-  // Détail d'une table cliquée, avant confirmation d'inscription
-  const [detailTable, setDetailTable] = useState<{ event: EventDoc; table: TableMJ } | null>(null);
 
   // Formulaire "Proposer ma table", par événement (clé = eventId)
   const [tableFormOpen, setTableFormOpen] = useState<Record<string, boolean>>({});
@@ -1000,9 +825,9 @@ const [loadingInscriptions, setLoadingInscriptions] = useState<Record<string, bo
 
   const MANUAL_FORM_VIDE = { prenom: "", nom: "", nombrePlaces: 1, tableId: "" };
 
-const [manualFormOpen, setManualFormOpen] = useState<Record<string, boolean>>({});
-const [manualForm, setManualForm] = useState<Record<string, typeof MANUAL_FORM_VIDE>>({});
-const [submittingManuel, setSubmittingManuel] = useState<Record<string, boolean>>({});
+  const [manualFormOpen, setManualFormOpen] = useState<Record<string, boolean>>({});
+  const [manualForm, setManualForm] = useState<Record<string, typeof MANUAL_FORM_VIDE>>({});
+  const [submittingManuel, setSubmittingManuel] = useState<Record<string, boolean>>({});
   const [selected, setSelected] = useState<{ event: EventDoc; table: TableMJ | null } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -1063,59 +888,59 @@ const [submittingManuel, setSubmittingManuel] = useState<Record<string, boolean>
   }, [lieu, slug]);
 
   async function toggleExpand(eventId: string) {
-  if (expandedId === eventId) {
-    setExpandedId(null);
-    return;
-  }
-  setExpandedId(eventId);
-
-  if (!tablesParEvent[eventId]) {
-    setLoadingTables(prev => ({ ...prev, [eventId]: true }));
-    try {
-      const snap = await getDocs(collection(db, "evenements", eventId, "tables"));
-      const tables = snap.docs.map(d => ({ id: d.id, inscrits: 0, ...d.data() })) as TableMJ[];
-      setTablesParEvent(prev => ({ ...prev, [eventId]: tables }));
-    } catch {
-      setTablesParEvent(prev => ({ ...prev, [eventId]: [] }));
-    } finally {
-      setLoadingTables(prev => ({ ...prev, [eventId]: false }));
+    if (expandedId === eventId) {
+      setExpandedId(null);
+      return;
     }
-  }
+    setExpandedId(eventId);
 
-  if (user && !(eventId in mesInscriptions)) {
-    try {
-      const snap = await getDocs(
-        query(collection(db, "evenements", eventId, "inscriptions"), where("userId", "==", user.uid))
-      );
-      if (!snap.empty) {
-        const d = snap.docs[0].data() as any;
-        setMesInscriptions(prev => ({ ...prev, [eventId]: { tableId: d.tableId } }));
-      } else {
+    if (!tablesParEvent[eventId]) {
+      setLoadingTables(prev => ({ ...prev, [eventId]: true }));
+      try {
+        const snap = await getDocs(collection(db, "evenements", eventId, "tables"));
+        const tables = snap.docs.map(d => ({ id: d.id, inscrits: 0, ...d.data() })) as TableMJ[];
+        setTablesParEvent(prev => ({ ...prev, [eventId]: tables }));
+      } catch {
+        setTablesParEvent(prev => ({ ...prev, [eventId]: [] }));
+      } finally {
+        setLoadingTables(prev => ({ ...prev, [eventId]: false }));
+      }
+    }
+
+    if (user && !(eventId in mesInscriptions)) {
+      try {
+        const snap = await getDocs(
+          query(collection(db, "evenements", eventId, "inscriptions"), where("userId", "==", user.uid))
+        );
+        if (!snap.empty) {
+          const d = snap.docs[0].data() as any;
+          setMesInscriptions(prev => ({ ...prev, [eventId]: { tableId: d.tableId } }));
+        } else {
+          setMesInscriptions(prev => ({ ...prev, [eventId]: null }));
+        }
+      } catch {
         setMesInscriptions(prev => ({ ...prev, [eventId]: null }));
       }
-    } catch {
-      setMesInscriptions(prev => ({ ...prev, [eventId]: null }));
+    }
+
+    // ── Suivi complet pour le MJ référent (organisateur) ou l'admin ──────────
+    const event = events.find(ev => ev.id === eventId);
+    const estReferent = !!user && !!event &&
+      (event.mjId === user.uid || userProfile?.role === "admin");
+
+    if (estReferent && !(eventId in inscriptionsParEvent)) {
+      setLoadingInscriptions(prev => ({ ...prev, [eventId]: true }));
+      try {
+        const snap = await getDocs(collection(db, "evenements", eventId, "inscriptions"));
+        const list = snap.docs.map(d => ({ id: d.id, ...d.data() })) as InscriptionJoueur[];
+        setInscriptionsParEvent(prev => ({ ...prev, [eventId]: list }));
+      } catch {
+        setInscriptionsParEvent(prev => ({ ...prev, [eventId]: [] }));
+      } finally {
+        setLoadingInscriptions(prev => ({ ...prev, [eventId]: false }));
+      }
     }
   }
-
-  // ── Suivi complet pour le MJ référent (organisateur) ou l'admin ──────────
-  const event = events.find(ev => ev.id === eventId);
-  const estReferent = !!user && !!event &&
-    (event.mjId === user.uid || userProfile?.role === "admin");
-
-  if (estReferent && !(eventId in inscriptionsParEvent)) {
-    setLoadingInscriptions(prev => ({ ...prev, [eventId]: true }));
-    try {
-      const snap = await getDocs(collection(db, "evenements", eventId, "inscriptions"));
-      const list = snap.docs.map(d => ({ id: d.id, ...d.data() })) as InscriptionJoueur[];
-      setInscriptionsParEvent(prev => ({ ...prev, [eventId]: list }));
-    } catch {
-      setInscriptionsParEvent(prev => ({ ...prev, [eventId]: [] }));
-    } finally {
-      setLoadingInscriptions(prev => ({ ...prev, [eventId]: false }));
-    }
-  }
-}
 
   function openRegisterModal(event: EventDoc, table: TableMJ | null) {
     if (authLoading) return;
@@ -1123,7 +948,6 @@ const [submittingManuel, setSubmittingManuel] = useState<Record<string, boolean>
       window.location.href = `/login?redirect=${encodeURIComponent(window.location.pathname)}`;
       return;
     }
-    setDetailTable(null);
     setSelected({ event, table });
   }
 
@@ -1206,27 +1030,28 @@ const [submittingManuel, setSubmittingManuel] = useState<Record<string, boolean>
         tableMjNom: table?.mjNom || null,
         createdAt: serverTimestamp(),
       });
+
       try {
-  await fetch("/api/inscription", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      email: userProfile.email,
-      pseudo: userProfile.pseudo,
-      eventTitle: event.titre,
-      date: event.date,
-      heure: event.heure,
-      table: table?.mjNom
-        ? `${table.mjNom}${table.systeme ? ` - ${table.systeme}` : ""}`
-        : null,
-      statut: result.statut,
-    }),
-  });
-} catch (err) {
-  console.error("Erreur envoi email :", err);
-}
+        await fetch("/api/inscription", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: userProfile.email,
+            pseudo: userProfile.pseudo,
+            eventTitle: event.titre,
+            date: event.date,
+            heure: event.heure,
+            table: table?.mjNom
+              ? `${table.mjNom}${table.systeme ? ` - ${table.systeme}` : ""}`
+              : null,
+            statut: result.statut,
+            // Lien direct vers la page de l'animation, utilisable dans l'email
+            lien: window.location.origin + (event.lien || `/evenements/${slug}/${lieu}/${event.id}`),
+          }),
+        });
+      } catch (err) {
+        console.error("Erreur envoi email :", err);
+      }
 
       if (table) {
         setTablesParEvent(prev => ({
@@ -1466,7 +1291,8 @@ const [submittingManuel, setSubmittingManuel] = useState<Record<string, boolean>
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith("image/")) { alert("Le fichier doit être une image."); return; }
-    if (file.size > 15 * 1024 * 1024)   { alert("L'image ne doit pas dépasser 15 Mo."); return; }
+    // 10 Mo : plafond habituel de l'offre gratuite Cloudinary
+    if (file.size > 10 * 1024 * 1024) { alert("L'image ne doit pas dépasser 10 Mo."); return; }
     setTableImageFile(prev => ({ ...prev, [eventId]: file }));
     setTableImagePreview(prev => ({ ...prev, [eventId]: URL.createObjectURL(file) }));
   }
@@ -1596,120 +1422,131 @@ const [submittingManuel, setSubmittingManuel] = useState<Record<string, boolean>
   }
 
   function ouvrirFormulaireManuel(eventId: string) {
-  setManualForm(prev => ({ ...prev, [eventId]: prev[eventId] ?? { ...MANUAL_FORM_VIDE } }));
-  setManualFormOpen(prev => ({ ...prev, [eventId]: true }));
-}
-
-function fermerFormulaireManuel(eventId: string) {
-  setManualFormOpen(prev => ({ ...prev, [eventId]: false }));
-}
-
-async function ajouterInscriptionManuelle(eventId: string) {
-  if (!user) return;
-  const form = manualForm[eventId] ?? MANUAL_FORM_VIDE;
-  if (!form.prenom.trim() || !form.nom.trim() || form.nombrePlaces < 1) {
-    alert("Merci de renseigner le prénom, le nom et le nombre de places.");
-    return;
+    setManualForm(prev => ({ ...prev, [eventId]: prev[eventId] ?? { ...MANUAL_FORM_VIDE } }));
+    setManualFormOpen(prev => ({ ...prev, [eventId]: true }));
   }
 
-  const tableChoisie = form.tableId
-    ? (tablesParEvent[eventId] ?? []).find(t => t.id === form.tableId) ?? null
-    : null;
-
-  setSubmittingManuel(prev => ({ ...prev, [eventId]: true }));
-  try {
-    const result: { statut: "confirme" | "attente" } = { statut: "confirme" };
-
-    if (tableChoisie) {
-      await runTransaction(db, async (transaction) => {
-        const tableRef = doc(db, "evenements", eventId, "tables", tableChoisie.id);
-        const tableSnap = await transaction.get(tableRef);
-        if (!tableSnap.exists()) throw new Error("Cette table n'existe plus.");
-        const d = tableSnap.data();
-        const placesRestantes = (d.placesMax ?? 0) - (d.inscrits || 0);
-        if (placesRestantes >= form.nombrePlaces) {
-          result.statut = "confirme";
-          transaction.update(tableRef, { inscrits: increment(form.nombrePlaces) });
-        } else {
-          result.statut = "attente";
-        }
-      });
-    } else {
-      await runTransaction(db, async (transaction) => {
-        const eventRef = doc(db, "evenements", eventId);
-        const eventSnap = await transaction.get(eventRef);
-        if (!eventSnap.exists()) throw new Error("Animation introuvable");
-        const d = eventSnap.data();
-        const placesRestantes = (d.places ?? 0) - (d.inscrits || 0);
-        if (placesRestantes >= form.nombrePlaces) {
-          result.statut = "confirme";
-          transaction.update(eventRef, { inscrits: increment(form.nombrePlaces) });
-        } else {
-          result.statut = "attente";
-        }
-      });
-    }
-
-    const docRef = await addDoc(collection(db, "evenements", eventId, "inscriptions"), {
-      manuel: true,
-      prenom: form.prenom.trim(),
-      nom: form.nom.trim(),
-      pseudo: `${form.prenom.trim()} ${form.nom.trim()}`,
-      email: "",
-      nombrePlaces: form.nombrePlaces,
-      tableId: tableChoisie?.id || null,
-      tableMjNom: tableChoisie?.mjNom || null,
-      statut: result.statut,
-      ajoutePar: user.uid,
-      createdAt: serverTimestamp(),
-    });
-
-    setInscriptionsParEvent(prev => ({
-      ...prev,
-      [eventId]: [
-        ...(prev[eventId] ?? []),
-        {
-          id: docRef.id,
-          prenom: form.prenom.trim(),
-          nom: form.nom.trim(),
-          pseudo: `${form.prenom.trim()} ${form.nom.trim()}`,
-          email: "",
-          statut: result.statut,
-          tableId: tableChoisie?.id || null,
-          tableMjNom: tableChoisie?.mjNom || null,
-          manuel: true,
-          nombrePlaces: form.nombrePlaces,
-        },
-      ],
-    }));
-
-    if (result.statut === "confirme") {
-      if (tableChoisie) {
-        setTablesParEvent(prev => ({
-          ...prev,
-          [eventId]: (prev[eventId] ?? []).map(t =>
-            t.id === tableChoisie.id
-              ? { ...t, inscrits: (t.inscrits ?? 0) + form.nombrePlaces }
-              : t
-          ),
-        }));
-      } else {
-        setEvents(prev => prev.map(ev =>
-          ev.id === eventId
-            ? { ...ev, inscrits: (ev.inscrits ?? 0) + form.nombrePlaces }
-            : ev
-        ));
-      }
-    }
-
+  function fermerFormulaireManuel(eventId: string) {
     setManualFormOpen(prev => ({ ...prev, [eventId]: false }));
-    setManualForm(prev => ({ ...prev, [eventId]: { ...MANUAL_FORM_VIDE } }));
-  } catch (err: any) {
-    alert("Erreur lors de l'ajout : " + (err.message || "inconnue"));
-  } finally {
-    setSubmittingManuel(prev => ({ ...prev, [eventId]: false }));
   }
-}
+
+  async function ajouterInscriptionManuelle(eventId: string) {
+    if (!user) return;
+    const form = manualForm[eventId] ?? MANUAL_FORM_VIDE;
+    if (!form.prenom.trim() || !form.nom.trim() || form.nombrePlaces < 1) {
+      alert("Merci de renseigner le prénom, le nom et le nombre de places.");
+      return;
+    }
+
+    const tableChoisie = form.tableId
+      ? (tablesParEvent[eventId] ?? []).find(t => t.id === form.tableId) ?? null
+      : null;
+
+    setSubmittingManuel(prev => ({ ...prev, [eventId]: true }));
+    try {
+      const result: { statut: "confirme" | "attente" } = { statut: "confirme" };
+
+      if (tableChoisie) {
+        await runTransaction(db, async (transaction) => {
+          const tableRef = doc(db, "evenements", eventId, "tables", tableChoisie.id);
+          const tableSnap = await transaction.get(tableRef);
+          if (!tableSnap.exists()) throw new Error("Cette table n'existe plus.");
+          const d = tableSnap.data();
+          const placesRestantes = (d.placesMax ?? 0) - (d.inscrits || 0);
+          if (placesRestantes >= form.nombrePlaces) {
+            result.statut = "confirme";
+            transaction.update(tableRef, { inscrits: increment(form.nombrePlaces) });
+          } else {
+            result.statut = "attente";
+          }
+        });
+      } else {
+        await runTransaction(db, async (transaction) => {
+          const eventRef = doc(db, "evenements", eventId);
+          const eventSnap = await transaction.get(eventRef);
+          if (!eventSnap.exists()) throw new Error("Animation introuvable");
+          const d = eventSnap.data();
+          const placesRestantes = (d.places ?? 0) - (d.inscrits || 0);
+          if (placesRestantes >= form.nombrePlaces) {
+            result.statut = "confirme";
+            transaction.update(eventRef, { inscrits: increment(form.nombrePlaces) });
+          } else {
+            result.statut = "attente";
+          }
+        });
+      }
+
+      const docRef = await addDoc(collection(db, "evenements", eventId, "inscriptions"), {
+        manuel: true,
+        prenom: form.prenom.trim(),
+        nom: form.nom.trim(),
+        pseudo: `${form.prenom.trim()} ${form.nom.trim()}`,
+        email: "",
+        nombrePlaces: form.nombrePlaces,
+        tableId: tableChoisie?.id || null,
+        tableMjNom: tableChoisie?.mjNom || null,
+        statut: result.statut,
+        ajoutePar: user.uid,
+        createdAt: serverTimestamp(),
+      });
+
+      setInscriptionsParEvent(prev => ({
+        ...prev,
+        [eventId]: [
+          ...(prev[eventId] ?? []),
+          {
+            id: docRef.id,
+            prenom: form.prenom.trim(),
+            nom: form.nom.trim(),
+            pseudo: `${form.prenom.trim()} ${form.nom.trim()}`,
+            email: "",
+            statut: result.statut,
+            tableId: tableChoisie?.id || null,
+            tableMjNom: tableChoisie?.mjNom || null,
+            manuel: true,
+            nombrePlaces: form.nombrePlaces,
+          },
+        ],
+      }));
+
+      if (result.statut === "confirme") {
+        if (tableChoisie) {
+          setTablesParEvent(prev => ({
+            ...prev,
+            [eventId]: (prev[eventId] ?? []).map(t =>
+              t.id === tableChoisie.id
+                ? { ...t, inscrits: (t.inscrits ?? 0) + form.nombrePlaces }
+                : t
+            ),
+          }));
+        } else {
+          setEvents(prev => prev.map(ev =>
+            ev.id === eventId
+              ? { ...ev, inscrits: (ev.inscrits ?? 0) + form.nombrePlaces }
+              : ev
+          ));
+        }
+      }
+
+      setManualFormOpen(prev => ({ ...prev, [eventId]: false }));
+      setManualForm(prev => ({ ...prev, [eventId]: { ...MANUAL_FORM_VIDE } }));
+    } catch (err: any) {
+      alert("Erreur lors de l'ajout : " + (err.message || "inconnue"));
+    } finally {
+      setSubmittingManuel(prev => ({ ...prev, [eventId]: false }));
+    }
+  }
+
+  // Lieu non (encore) déclaré dans Firestore ("lieux") : on construit un
+  // en-tête de repli à partir du premier événement trouvé pour ce slug,
+  // pour ne jamais afficher une page cassée faute de fiche lieu.
+  const venueAffichee: VenueInfo = venue ?? {
+    venue: events[0]?.ville || events[0]?.titre || "Lieu à préciser",
+    ville: events[0]?.ville || "",
+    adresse: events[0]?.ville || "Adresse à préciser",
+    schedule: "",
+    image: undefined,
+  };
 
   const groupesParMois = events.reduce<{ mois: string; events: EventDoc[] }[]>((acc, e) => {
     const mois = formatMoisAnnee(e.date);
@@ -1723,13 +1560,13 @@ async function ajouterInscriptionManuelle(eventId: string) {
     <Page>
       <Navigation />
 
-      <Hero $bgImage={venue.image}>
+      <Hero $bgImage={venueAffichee.image}>
         <HeroContent>
           <BackLink href={`/evenements/${slug}`}>← Retour aux animations</BackLink>
-          <Title>{venue.venue}</Title>
+          <Title>{venueAffichee.venue}</Title>
           <MetaRow>
-            <MetaItem>📍 {venue.adresse}</MetaItem>
-            <RecurringBadge>🔁 {venue.schedule}</RecurringBadge>
+            {venueAffichee.adresse && <MetaItem>📍 {venueAffichee.adresse}</MetaItem>}
+            {venueAffichee.schedule && <RecurringBadge>🔁 {venueAffichee.schedule}</RecurringBadge>}
           </MetaRow>
         </HeroContent>
       </Hero>
@@ -1752,7 +1589,7 @@ async function ajouterInscriptionManuelle(eventId: string) {
               <List>
                 {eventsDuMois.map(e => {
                   const estReferent = !!user && (e.mjId === user.uid || userProfile?.role === "admin");
-const inscriptionsDeCetteDate = inscriptionsParEvent[e.id] ?? [];
+                  const inscriptionsDeCetteDate = inscriptionsParEvent[e.id] ?? [];
                   const dispo = e.places - (e.inscrits ?? 0);
                   const level = getPlacesLevel(dispo);
                   const estProchaine = events[0].id === e.id;
@@ -1767,7 +1604,7 @@ const inscriptionsDeCetteDate = inscriptionsParEvent[e.id] ?? [];
 
                   return (
                     <EventCard key={e.id} $isNext={estProchaine}>
-                      <CardTop onClick={() => toggleExpand(e.id)}>
+                      <CardTop>
                         {estProchaine && <NextTag>⭐ Prochaine séance</NextTag>}
                         <EventTopRow>
                           <EventInfo>
@@ -1781,9 +1618,27 @@ const inscriptionsDeCetteDate = inscriptionsParEvent[e.id] ?? [];
                             <PlacesBadge $level={level}>
                               {level === "full" ? "Complet" : `${dispo} place${dispo > 1 ? "s" : ""}`}
                             </PlacesBadge>
-                            <ExpandHint>{isExpanded ? "▲ Réduire" : "▼ Voir les tables"}</ExpandHint>
                           </RightCol>
                         </EventTopRow>
+
+                        <EventName>{e.titre}</EventName>
+                        {e.accroche && <EventPitch>{e.accroche}</EventPitch>}
+                        {e.programme && e.programme.length > 0 && (
+                          <EventSteps>
+                            {e.programme.slice(0, 3).map((p, i) => (
+                              <li key={i}>{p.heure} · {p.titre}</li>
+                            ))}
+                          </EventSteps>
+                        )}
+
+                        <EventActions>
+                          <DetailBtn href={e.lien || `/evenements/${slug}/${lieu}/${e.id}`}>
+                            {level === "full" ? "Voir les détails, liste d'attente →" : "Voir les détails et s'inscrire →"}
+                          </DetailBtn>
+                          <ToggleBtn onClick={() => toggleExpand(e.id)} aria-expanded={isExpanded}>
+                            {isExpanded ? "▲ Réduire" : "▼ Voir les tables"}
+                          </ToggleBtn>
+                        </EventActions>
                       </CardTop>
 
                       {isExpanded && (
@@ -1820,62 +1675,13 @@ const inscriptionsDeCetteDate = inscriptionsParEvent[e.id] ?? [];
                                 <NoTablesMsg>Aucune table proposée pour le moment.</NoTablesMsg>
                               ) : (
                                 <TCGrid>
-                                  {tablesApprouvees.map((t, i) => {
-                                    const placesTableDispo = t.placesMax - (t.inscrits ?? 0);
-                                    const tableComplete = placesTableDispo <= 0;
-                                    const tStatus = tableComplete ? "full" : placesTableDispo <= 2 ? "low" : "ok";
-                                    return (
-                                      <TCCard
-                                        key={t.id}
-                                        style={{ animationDelay: `${i * 0.05}s` }}
-                                        onClick={() => setDetailTable({ event: e, table: t })}
-                                      >
-                                        <TCHeader $bgImage={t.image}>
-                                          {t.systeme && <TCSystemeBadge>{t.systeme}</TCSystemeBadge>}
-                                          <TCStatusBadge $status={tStatus}>
-                                            {tableComplete ? "Complet" : `${placesTableDispo} place${placesTableDispo > 1 ? "s" : ""}`}
-                                          </TCStatusBadge>
-                                          {t.ageTag && t.ageTag !== "tous" && (
-                                            <TCAgeBadge $level={t.ageTag}>{t.ageTag}+</TCAgeBadge>
-                                          )}
-                                          <TCTitle>{t.mjNom}</TCTitle>
-                                        </TCHeader>
-
-                                        <TCBody>
-                                          <TCMetaRow>
-                                            {t.duree && <TCTag>⏱ {t.duree}</TCTag>}
-                                            {t.personnages && (
-                                              <TCTag>
-                                                {t.personnages === "pretires" ? "🧾 Prétirés" : "✏️ Création"}
-                                              </TCTag>
-                                            )}
-                                          </TCMetaRow>
-
-                                          <TCDesc>{t.description}</TCDesc>
-
-                                          <TCFooter>
-                                            <TCMjRow>
-                                              <TCMjAvatar>{getInitiales(t.mjNom)}</TCMjAvatar>
-                                              <TCMjName>{t.mjNom}</TCMjName>
-                                            </TCMjRow>
-
-                                            <TCBtnGroup>
-                                              <TCDetailBtn
-                                                onClick={(ev) => { ev.stopPropagation(); setDetailTable({ event: e, table: t }); }}
-                                              >
-                                                Détails
-                                              </TCDetailBtn>
-                                              <TCRegisterBtn
-                                                onClick={(ev) => { ev.stopPropagation(); openRegisterModal(e, t); }}
-                                              >
-                                                {!user ? "Se connecter" : tableComplete ? "Liste d'attente" : "S'inscrire"}
-                                              </TCRegisterBtn>
-                                            </TCBtnGroup>
-                                          </TCFooter>
-                                        </TCBody>
-                                      </TCCard>
-                                    );
-                                  })}
+                                  {tablesApprouvees.map(t => (
+                                    <TableCard
+                                      key={t.id}
+                                      table={t}
+                                      href={`/evenements/${slug}/${lieu}/${e.id}/tables/${t.id}`}
+                                    />
+                                  ))}
                                 </TCGrid>
                               )}
 
@@ -1951,11 +1757,11 @@ const inscriptionsDeCetteDate = inscriptionsParEvent[e.id] ?? [];
                                           </RemoveImgBtn>
                                         </>
                                       ) : (
-                                        <FileHint>📷 Cliquez pour ajouter une image (JPG, PNG — 15 Mo max)</FileHint>
+                                        <FileHint>📷 Cliquez pour ajouter une image (JPG, PNG — 10 Mo max)</FileHint>
                                       )}
                                     </FileDropZone>
                                     {uploadingTableImage[e.id] && (
-                                      <UploadProgress>⏳ Envoi de l'image en cours…</UploadProgress>
+                                      <UploadProgress>⏳ Envoi de l&apos;image en cours…</UploadProgress>
                                     )}
                                   </div>
 
@@ -2070,131 +1876,133 @@ const inscriptionsDeCetteDate = inscriptionsParEvent[e.id] ?? [];
                               )}
                             </MjSection>
                           )}
+
                           {estReferent && (
-  <ReferentPanel>
-    <ReferentTitle>👁️ Suivi de l&apos;animation (organisateur)</ReferentTitle>
+                            <ReferentPanel>
+                              <ReferentTitle>👁️ Suivi de l&apos;animation (organisateur)</ReferentTitle>
 
-    <SmallBtn
-      onClick={(ev) => { ev.stopPropagation(); setToCancelEvent(e); }}
-      style={{ background: "rgba(255,80,80,0.12)", borderColor: "rgba(255,80,80,0.35)", color: "#ff8080", marginBottom: "1rem" }}
-    >
-      🚫 Annuler cette animation
-    </SmallBtn>
+                              <SmallBtn
+                                onClick={(ev) => { ev.stopPropagation(); setToCancelEvent(e); }}
+                                style={{ background: "rgba(255,80,80,0.12)", borderColor: "rgba(255,80,80,0.35)", color: "#ff8080", marginBottom: "1rem" }}
+                              >
+                                🚫 Annuler cette animation
+                              </SmallBtn>
 
-    <ReferentSubLabel>
-      Joueurs inscrits ({inscriptionsDeCetteDate.filter(i => i.statut === "confirme").length})
-    </ReferentSubLabel>
-    {loadingInscriptions[e.id] ? (
-      <NoTablesMsg>Chargement…</NoTablesMsg>
-    ) : inscriptionsDeCetteDate.length === 0 ? (
-      <NoTablesMsg>Aucune inscription pour le moment.</NoTablesMsg>
-    ) : (
-      inscriptionsDeCetteDate.map(i => (
-  <ReferentItem key={i.id}>
-    <span>
-      {i.pseudo || `${i.prenom ?? ""} ${i.nom ?? ""}`.trim() || i.email}
-      {i.nombrePlaces && i.nombrePlaces > 1 ? ` · ${i.nombrePlaces} places` : ""}
-      {i.tableMjNom ? ` · table de ${i.tableMjNom}` : " · sans table précise"}
-      {i.manuel ? " · ajouté par le MJ" : ""}
-    </span>
-    <StatusPill $tone={i.statut === "confirme" ? "ok" : "warn"}>
-      {i.statut === "confirme" ? "Confirmé" : "Liste d'attente"}
-    </StatusPill>
-  </ReferentItem>
-))
-    )}
+                              <ReferentSubLabel>
+                                Joueurs inscrits ({inscriptionsDeCetteDate.filter(i => i.statut === "confirme").length})
+                              </ReferentSubLabel>
+                              {loadingInscriptions[e.id] ? (
+                                <NoTablesMsg>Chargement…</NoTablesMsg>
+                              ) : inscriptionsDeCetteDate.length === 0 ? (
+                                <NoTablesMsg>Aucune inscription pour le moment.</NoTablesMsg>
+                              ) : (
+                                inscriptionsDeCetteDate.map(i => (
+                                  <ReferentItem key={i.id}>
+                                    <span>
+                                      {i.pseudo || `${i.prenom ?? ""} ${i.nom ?? ""}`.trim() || i.email}
+                                      {i.nombrePlaces && i.nombrePlaces > 1 ? ` · ${i.nombrePlaces} places` : ""}
+                                      {i.tableMjNom ? ` · table de ${i.tableMjNom}` : " · sans table précise"}
+                                      {i.manuel ? " · ajouté par le MJ" : ""}
+                                    </span>
+                                    <StatusPill $tone={i.statut === "confirme" ? "ok" : "warn"}>
+                                      {i.statut === "confirme" ? "Confirmé" : "Liste d'attente"}
+                                    </StatusPill>
+                                  </ReferentItem>
+                                ))
+                              )}
 
-    <ReferentSubLabel>Tables proposées par les MJ ({tables.length})</ReferentSubLabel>
-    {tables.length === 0 ? (
-      <NoTablesMsg>Aucune table proposée pour le moment.</NoTablesMsg>
-    ) : (
-      tables.map(t => (
-        <ReferentItem key={t.id}>
-          <span style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-            {t.image && <TableThumb src={t.image} alt="" />}
-            🧙 {t.mjNom}{t.systeme ? ` · ${t.systeme}` : ""} · {t.inscrits}/{t.placesMax} places
-          </span>
-          <StatusPill $tone={t.status === "approved" ? "ok" : t.status === "rejected" ? "danger" : "warn"}>
-            {t.status === "approved" ? "Validée" : t.status === "rejected" ? "Refusée" : "En attente"}
-          </StatusPill>
-        </ReferentItem>
-      ))
-    )}
-    <ReferentSubLabel>Ajouter un joueur manuellement</ReferentSubLabel>
-{!manualFormOpen[e.id] ? (
-  <ProposeTableBtn onClick={(ev) => { ev.stopPropagation(); ouvrirFormulaireManuel(e.id); }}>
-    ➕ Inscrire quelqu'un manuellement
-  </ProposeTableBtn>
-) : (
-  <TableFormBox onClick={(ev) => ev.stopPropagation()}>
-    <div style={{ display: "flex", gap: "0.6rem" }}>
-      <div style={{ flex: 1 }}>
-        <FieldLabel>Prénom</FieldLabel>
-        <Input
-          value={(manualForm[e.id] ?? MANUAL_FORM_VIDE).prenom}
-          onChange={ev => setManualForm(prev => ({
-            ...prev,
-            [e.id]: { ...(prev[e.id] ?? MANUAL_FORM_VIDE), prenom: ev.target.value },
-          }))}
-          placeholder="Jean"
-        />
-      </div>
-      <div style={{ flex: 1 }}>
-        <FieldLabel>Nom</FieldLabel>
-        <Input
-          value={(manualForm[e.id] ?? MANUAL_FORM_VIDE).nom}
-          onChange={ev => setManualForm(prev => ({
-            ...prev,
-            [e.id]: { ...(prev[e.id] ?? MANUAL_FORM_VIDE), nom: ev.target.value },
-          }))}
-          placeholder="Dupont"
-        />
-      </div>
-    </div>
-    <div>
-      <FieldLabel>Nombre de places</FieldLabel>
-      <Input
-        type="number"
-        min={1}
-        value={(manualForm[e.id] ?? MANUAL_FORM_VIDE).nombrePlaces}
-        onChange={ev => setManualForm(prev => ({
-          ...prev,
-          [e.id]: { ...(prev[e.id] ?? MANUAL_FORM_VIDE), nombrePlaces: Number(ev.target.value) },
-        }))}
-      />
-    </div>
-    {tables.filter(t => t.status === "approved").length > 0 && (
-      <div>
-        <FieldLabel>Table (optionnel)</FieldLabel>
-        <Select
-          value={(manualForm[e.id] ?? MANUAL_FORM_VIDE).tableId}
-          onChange={ev => setManualForm(prev => ({
-            ...prev,
-            [e.id]: { ...(prev[e.id] ?? MANUAL_FORM_VIDE), tableId: ev.target.value },
-          }))}
-        >
-          <option value="">Inscription générale (sans table)</option>
-          {tables.filter(t => t.status === "approved").map(t => (
-            <option key={t.id} value={t.id}>
-              {t.mjNom} {t.systeme ? `· ${t.systeme}` : ""}
-            </option>
-          ))}
-        </Select>
-      </div>
-    )}
-    <FormActionsRow>
-      <CancelSmallBtn onClick={() => fermerFormulaireManuel(e.id)}>Annuler</CancelSmallBtn>
-      <SubmitTableBtn
-        disabled={submittingManuel[e.id]}
-        onClick={() => ajouterInscriptionManuelle(e.id)}
-      >
-        {submittingManuel[e.id] ? "Ajout…" : "Ajouter"}
-      </SubmitTableBtn>
-    </FormActionsRow>
-  </TableFormBox>
-)}
-  </ReferentPanel>
-)}
+                              <ReferentSubLabel>Tables proposées par les MJ ({tables.length})</ReferentSubLabel>
+                              {tables.length === 0 ? (
+                                <NoTablesMsg>Aucune table proposée pour le moment.</NoTablesMsg>
+                              ) : (
+                                tables.map(t => (
+                                  <ReferentItem key={t.id}>
+                                    <span style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                                      {t.image && <TableThumb src={t.image} alt="" />}
+                                      🧙 {t.mjNom}{t.systeme ? ` · ${t.systeme}` : ""} · {t.inscrits}/{t.placesMax} places
+                                    </span>
+                                    <StatusPill $tone={t.status === "approved" ? "ok" : t.status === "rejected" ? "danger" : "warn"}>
+                                      {t.status === "approved" ? "Validée" : t.status === "rejected" ? "Refusée" : "En attente"}
+                                    </StatusPill>
+                                  </ReferentItem>
+                                ))
+                              )}
+
+                              <ReferentSubLabel>Ajouter un joueur manuellement</ReferentSubLabel>
+                              {!manualFormOpen[e.id] ? (
+                                <ProposeTableBtn onClick={(ev) => { ev.stopPropagation(); ouvrirFormulaireManuel(e.id); }}>
+                                  ➕ Inscrire quelqu&apos;un manuellement
+                                </ProposeTableBtn>
+                              ) : (
+                                <TableFormBox onClick={(ev) => ev.stopPropagation()}>
+                                  <div style={{ display: "flex", gap: "0.6rem" }}>
+                                    <div style={{ flex: 1 }}>
+                                      <FieldLabel>Prénom</FieldLabel>
+                                      <Input
+                                        value={(manualForm[e.id] ?? MANUAL_FORM_VIDE).prenom}
+                                        onChange={ev => setManualForm(prev => ({
+                                          ...prev,
+                                          [e.id]: { ...(prev[e.id] ?? MANUAL_FORM_VIDE), prenom: ev.target.value },
+                                        }))}
+                                        placeholder="Jean"
+                                      />
+                                    </div>
+                                    <div style={{ flex: 1 }}>
+                                      <FieldLabel>Nom</FieldLabel>
+                                      <Input
+                                        value={(manualForm[e.id] ?? MANUAL_FORM_VIDE).nom}
+                                        onChange={ev => setManualForm(prev => ({
+                                          ...prev,
+                                          [e.id]: { ...(prev[e.id] ?? MANUAL_FORM_VIDE), nom: ev.target.value },
+                                        }))}
+                                        placeholder="Dupont"
+                                      />
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <FieldLabel>Nombre de places</FieldLabel>
+                                    <Input
+                                      type="number"
+                                      min={1}
+                                      value={(manualForm[e.id] ?? MANUAL_FORM_VIDE).nombrePlaces}
+                                      onChange={ev => setManualForm(prev => ({
+                                        ...prev,
+                                        [e.id]: { ...(prev[e.id] ?? MANUAL_FORM_VIDE), nombrePlaces: Number(ev.target.value) },
+                                      }))}
+                                    />
+                                  </div>
+                                  {tables.filter(t => t.status === "approved").length > 0 && (
+                                    <div>
+                                      <FieldLabel>Table (optionnel)</FieldLabel>
+                                      <Select
+                                        value={(manualForm[e.id] ?? MANUAL_FORM_VIDE).tableId}
+                                        onChange={ev => setManualForm(prev => ({
+                                          ...prev,
+                                          [e.id]: { ...(prev[e.id] ?? MANUAL_FORM_VIDE), tableId: ev.target.value },
+                                        }))}
+                                      >
+                                        <option value="">Inscription générale (sans table)</option>
+                                        {tables.filter(t => t.status === "approved").map(t => (
+                                          <option key={t.id} value={t.id}>
+                                            {t.mjNom} {t.systeme ? `· ${t.systeme}` : ""}
+                                          </option>
+                                        ))}
+                                      </Select>
+                                    </div>
+                                  )}
+                                  <FormActionsRow>
+                                    <CancelSmallBtn onClick={() => fermerFormulaireManuel(e.id)}>Annuler</CancelSmallBtn>
+                                    <SubmitTableBtn
+                                      disabled={submittingManuel[e.id]}
+                                      onClick={() => ajouterInscriptionManuelle(e.id)}
+                                    >
+                                      {submittingManuel[e.id] ? "Ajout…" : "Ajouter"}
+                                    </SubmitTableBtn>
+                                  </FormActionsRow>
+                                </TableFormBox>
+                              )}
+                            </ReferentPanel>
+                          )}
                         </ExpandedZone>
                       )}
                     </EventCard>
@@ -2205,54 +2013,6 @@ const inscriptionsDeCetteDate = inscriptionsParEvent[e.id] ?? [];
           ))
         )}
       </Container>
-
-      {/* ── Modal détail d'une table (avant inscription) ── */}
-      {detailTable && (
-        <Overlay onClick={() => setDetailTable(null)}>
-          <Modal onClick={e => e.stopPropagation()}>
-            {detailTable.table.image && (
-              <ModalImage src={detailTable.table.image} alt={detailTable.table.mjNom} />
-            )}
-            <ModalTitle>
-              {detailTable.table.mjNom}
-              {detailTable.table.systeme ? ` · ${detailTable.table.systeme}` : ""}
-            </ModalTitle>
-            <ModalSub>
-              {formatJourComplet(detailTable.event.date)} · {detailTable.event.heure}
-            </ModalSub>
-
-            <ModalTagRow>
-              {detailTable.table.duree && <TCTag>⏱ {detailTable.table.duree}</TCTag>}
-              {detailTable.table.personnages && (
-                <TCTag>
-                  {detailTable.table.personnages === "pretires" ? "🧾 Prétirés fournis" : "✏️ Création à la table"}
-                </TCTag>
-              )}
-              {detailTable.table.ageTag && detailTable.table.ageTag !== "tous" && (
-                <TCTag>{detailTable.table.ageTag}+ ans</TCTag>
-              )}
-              <TCTag>
-                {(detailTable.table.placesMax - (detailTable.table.inscrits ?? 0)) <= 0
-                  ? "Complet"
-                  : `${detailTable.table.placesMax - (detailTable.table.inscrits ?? 0)} place${(detailTable.table.placesMax - (detailTable.table.inscrits ?? 0)) > 1 ? "s" : ""} dispo`}
-              </TCTag>
-            </ModalTagRow>
-
-            <ModalDesc>{detailTable.table.description}</ModalDesc>
-
-            <ModalActions>
-              <CancelBtn onClick={() => setDetailTable(null)}>Fermer</CancelBtn>
-              <ConfirmBtn onClick={() => openRegisterModal(detailTable.event, detailTable.table)}>
-                {!user
-                  ? "Se connecter pour s'inscrire"
-                  : (detailTable.table.placesMax - (detailTable.table.inscrits ?? 0)) <= 0
-                    ? "Rejoindre la liste d'attente"
-                    : "S'inscrire à cette table"}
-              </ConfirmBtn>
-            </ModalActions>
-          </Modal>
-        </Overlay>
-      )}
 
       {/* ── Modal inscription ── */}
       {selected && (

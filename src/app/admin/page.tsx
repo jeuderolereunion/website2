@@ -1,10 +1,15 @@
 "use client";
 
 import styled from "styled-components";
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState } from "react";
 import { db, auth } from "@/lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import Navigation from "@/components/Navigation";
+import { uploadToCloudinary } from "@/lib/cloudinaryLoader";
+import ContenuAnimationFields, {
+  ContenuAnimation,
+  nettoyerContenu,
+} from "@/components/ContenuAnimationFields";
 
 import {
   collection,
@@ -13,7 +18,7 @@ import {
   deleteDoc,
   doc,
   getDoc,
-   setDoc, 
+  setDoc,
   updateDoc,
   query,
   where,
@@ -37,7 +42,7 @@ type Proposition = {
   // ── Champs ajoutés depuis le formulaire "Proposer un événement" ───────────
   // Optionnels ici pour rester compatibles avec d'anciennes propositions
   // créées avant leur introduction.
-  type?: string;              // "one-shot" | "campagne"
+  type?: string; // "one-shot" | "campagne"
   systeme?: string;
   mjId?: string;
   mjNom?: string;
@@ -72,7 +77,7 @@ type TableAnimee = {
   places: number;
   inscrits: number;
   heure?: string;
-  status?: "pending" | "approved" | "rejected";  // ← ajouté
+  status?: "pending" | "approved" | "rejected";
   createdAt?: any;
 };
 
@@ -124,11 +129,11 @@ type PendingUser = {
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
 const TYPES_RESSOURCE: { value: TypeRessource; label: string }[] = [
-  { value: "regles",    label: "Règles & manuels" },
-  { value: "fiche",     label: "Fiche de personnage" },
-  { value: "carte",     label: "Carte & lieux" },
+  { value: "regles", label: "Règles & manuels" },
+  { value: "fiche", label: "Fiche de personnage" },
+  { value: "carte", label: "Carte & lieux" },
   { value: "bestiaire", label: "Bestiaire" },
-  { value: "scenario",  label: "Scénario & aventure" },
+  { value: "scenario", label: "Scénario & aventure" },
 ];
 
 const FORM_ANIMATION_VIDE = {
@@ -145,23 +150,22 @@ const FORM_ANIMATION_VIDE = {
   image: "",
   lieuType: "presentiel" as "presentiel" | "ligne",
   lieu: "",
-  lieuVilleLibre: "",      // ← nouveau
-  lieuAdresseLibre: "",    // ← nouveau
+  lieuVilleLibre: "",
+  lieuAdresseLibre: "",
   lieuDetail: "",
   mjId: "",
   mjNom: "",
   recurrence: "unique" as "unique" | "hebdomadaire",
 };
 
-const NOM_JOUR = ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"];
-
-
 const LIEUX: Record<string, { label: string; ville: string; adresse: string }> = {
   "3brasseurs": { label: "3 Brasseurs (Saint-Paul)", ville: "Saint-Paul", adresse: "Front de mer, Saint-Paul" },
-  "la-kour":    { label: "La Kour (Saint-Leu)",       ville: "Saint-Leu", adresse: "La Kour, Saint-Leu" },
-  "qg-tampon":  { label: "QG association (Le Tampon)", ville: "Le Tampon", adresse: "Le Tampon" },
-  "destruction-room":  { label: "Destruction Room(Saint-Pierre)", ville: "Saint-Pierre", adresse: "38 Rue Désiré Barquisseau, Saint-Pierre 97410" },
+  "la-kour": { label: "La Kour (Saint-Leu)", ville: "Saint-Leu", adresse: "La Kour, Saint-Leu" },
+  "qg-tampon": { label: "QG association (Le Tampon)", ville: "Le Tampon", adresse: "Le Tampon" },
+  "destruction-room": { label: "Destruction Room(Saint-Pierre)", ville: "Saint-Pierre", adresse: "38 Rue Désiré Barquisseau, Saint-Pierre 97410" },
+  "guyajeux": { label: "Guyajeux", ville: "Saint-Paul", adresse: "50 Rue du Kovil , Saint-Paul 97460" },
 };
+
 const UNIVERS_SUGGESTIONS = [
   "Donjons & Dragons",
   "Pathfinder",
@@ -179,6 +183,12 @@ const FORM_VIDE = {
   taille: "",
   url: "",
 };
+
+// Chemin RELATIF de la page publique d'une animation. On stocke le chemin et
+// non l'URL complète : si le domaine change, les liens restent valides.
+// La page lit l'animation par son id ; le segment "lieu" ne sert qu'au retour.
+const lienAnimation = (lieu: string | undefined, id: string) =>
+  `/evenements/animations/${lieu || "autre"}/${id}`;
 
 // ─── Styled components ────────────────────────────────────────────────────────
 
@@ -805,7 +815,7 @@ type AnimationPubliee = {
   tags?: string[];
   image?: string;
   lieuType?: "presentiel" | "ligne";
-  lieu?: string;          // ← ajouté : slug du lieu, ex "3brasseurs"
+  lieu?: string; // slug du lieu, ex "3brasseurs"
   adresse?: string;
   ville?: string;
   lieuDetail?: string;
@@ -813,18 +823,22 @@ type AnimationPubliee = {
   mjNom?: string;
   recurrent?: boolean;
   recurrenceId?: string;
-};
+  lien?: string; // chemin de la page publique, ex. /evenements/animations/<lieu>/<id>
+} & ContenuAnimation;
 
 // ─── Composant principal ──────────────────────────────────────────────────────
 
 export default function AdminPage() {
   const [formAnim, setFormAnim] = useState(FORM_ANIMATION_VIDE);
+  const [contenuAnim, setContenuAnim] = useState<ContenuAnimation>({});
+  const [contenuEdit, setContenuEdit] = useState<ContenuAnimation>({});
+  const [lienCopie, setLienCopie] = useState<string | null>(null);
   const [submittingAnim, setSubmittingAnim] = useState(false);
   const [messageAnim, setMessageAnim] = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const [mjs, setMjs] = useState<{ id: string; nom: string }[]>([]);
-const [editingOccurrence, setEditingOccurrence] = useState<string | null>(null);
-const [editDate, setEditDate] = useState("");
-const [editHeure, setEditHeure] = useState("");
+  const [editingOccurrence, setEditingOccurrence] = useState<string | null>(null);
+  const [editDate, setEditDate] = useState("");
+  const [editHeure, setEditHeure] = useState("");
   const [animations, setAnimations] = useState<AnimationPubliee[]>([]);
   const [loadingAnimations, setLoadingAnimations] = useState(true);
   const [authorized, setAuthorized] = useState(false);
@@ -857,46 +871,46 @@ const [editHeure, setEditHeure] = useState("");
   const [loadingEvts, setLoadingEvts] = useState(true);
   const [formAnimUploadPct, setFormAnimUploadPct] = useState<number | null>(null);
 
-const [editingGroupe, setEditingGroupe] = useState<AnimationPubliee[] | null>(null);
-const [editGroupForm, setEditGroupForm] = useState<{
-  titre: string;
-  description: string;
-  heure: string;
-  duree: string;
-  niveau: string;
-  systeme: string;
-  tags: string;
-  places: number;
-  image: string;
-  lieuType: "presentiel" | "ligne";
-  lieu: string;
-  lieuVilleLibre: string;     // ← nouveau
-  lieuAdresseLibre: string;   // ← nouveau
-  lieuDetail: string;
-  mjId: string;
-  mjNom: string;
-  recurrence: "unique" | "hebdomadaire";
-}>({
-  titre: "",
-  description: "",
-  heure: "20:00",
-  duree: "",
-  niveau: "Tous niveaux",
-  systeme: "",
-  tags: "",
-  places: 6,
-  image: "",
-  lieuType: "presentiel",
-  lieu: "",
-  lieuVilleLibre: "",     // ← nouveau
-  lieuAdresseLibre: "",   // ← nouveau
-  lieuDetail: "",
-  mjId: "",
-  mjNom: "",
-  recurrence: "unique",
-});
-const [editGroupUploadPct, setEditGroupUploadPct] = useState<number | null>(null);
-const [savingGroup, setSavingGroup] = useState(false);
+  const [editingGroupe, setEditingGroupe] = useState<AnimationPubliee[] | null>(null);
+  const [editGroupForm, setEditGroupForm] = useState<{
+    titre: string;
+    description: string;
+    heure: string;
+    duree: string;
+    niveau: string;
+    systeme: string;
+    tags: string;
+    places: number;
+    image: string;
+    lieuType: "presentiel" | "ligne";
+    lieu: string;
+    lieuVilleLibre: string;
+    lieuAdresseLibre: string;
+    lieuDetail: string;
+    mjId: string;
+    mjNom: string;
+    recurrence: "unique" | "hebdomadaire";
+  }>({
+    titre: "",
+    description: "",
+    heure: "20:00",
+    duree: "",
+    niveau: "Tous niveaux",
+    systeme: "",
+    tags: "",
+    places: 6,
+    image: "",
+    lieuType: "presentiel",
+    lieu: "",
+    lieuVilleLibre: "",
+    lieuAdresseLibre: "",
+    lieuDetail: "",
+    mjId: "",
+    mjNom: "",
+    recurrence: "unique",
+  });
+  const [editGroupUploadPct, setEditGroupUploadPct] = useState<number | null>(null);
+  const [savingGroup, setSavingGroup] = useState(false);
   const [tables, setTables] = useState<TableAnimee[]>([]);
   const [loadingTables, setLoadingTables] = useState(true);
   const [inscriptionsAnim, setInscriptionsAnim] = useState<InscriptionAnimation[]>([]);
@@ -924,6 +938,7 @@ const [savingGroup, setSavingGroup] = useState(false);
 
   const nbJoueurs = membres.filter(u => u.role !== "mj").length;
   const nbMJ = membres.filter(u => u.role === "mj").length;
+  const nbTablesEnAttente = tables.filter(t => (t.status ?? "pending") === "pending").length;
 
   const membresFiltres = membres.filter(u => {
     const matchRole = filtreRole === "tous"
@@ -944,15 +959,16 @@ const [savingGroup, setSavingGroup] = useState(false);
       return next;
     });
   }
+
   function nettoyerUndefined<T extends Record<string, any>>(obj: T): T {
-  const result = { ...obj };
-  for (const key in result) {
-    if (result[key] === undefined) {
-      delete result[key];
+    const result = { ...obj };
+    for (const key in result) {
+      if (result[key] === undefined) {
+        delete result[key];
+      }
     }
+    return result;
   }
-  return result;
-}
 
   function ajouterJours(dateISO: string, jours: number): string {
     const [y, m, d] = dateISO.split("-").map(Number);
@@ -995,37 +1011,37 @@ const [savingGroup, setSavingGroup] = useState(false);
   }
 
   async function validerTable(table: TableAnimee) {
-  if (processingIds.has(table.id)) return;
-  startProcessing(table.id);
-  try {
-    await updateDoc(doc(db, "evenements", table.animationId, "tables", table.id), {
-      status: "approved",
-    });
-    setTables(prev => prev.map(t => t.id === table.id ? { ...t, status: "approved" } as any : t));
-  } catch (err) {
-    console.error(err);
-    alert("Erreur lors de la validation de la table.");
-  } finally {
-    stopProcessing(table.id);
+    if (processingIds.has(table.id)) return;
+    startProcessing(table.id);
+    try {
+      await updateDoc(doc(db, "evenements", table.animationId, "tables", table.id), {
+        status: "approved",
+      });
+      setTables(prev => prev.map(t => t.id === table.id ? { ...t, status: "approved" } as any : t));
+    } catch (err) {
+      console.error(err);
+      alert("Erreur lors de la validation de la table.");
+    } finally {
+      stopProcessing(table.id);
+    }
   }
-}
 
-async function refuserTable(table: TableAnimee) {
-  if (processingIds.has(table.id)) return;
-  if (!confirm("Refuser cette table ?")) return;
-  startProcessing(table.id);
-  try {
-    await updateDoc(doc(db, "evenements", table.animationId, "tables", table.id), {
-      status: "rejected",
-    });
-    setTables(prev => prev.map(t => t.id === table.id ? { ...t, status: "rejected" } as any : t));
-  } catch (err) {
-    console.error(err);
-    alert("Erreur lors du refus de la table.");
-  } finally {
-    stopProcessing(table.id);
+  async function refuserTable(table: TableAnimee) {
+    if (processingIds.has(table.id)) return;
+    if (!confirm("Refuser cette table ?")) return;
+    startProcessing(table.id);
+    try {
+      await updateDoc(doc(db, "evenements", table.animationId, "tables", table.id), {
+        status: "rejected",
+      });
+      setTables(prev => prev.map(t => t.id === table.id ? { ...t, status: "rejected" } as any : t));
+    } catch (err) {
+      console.error(err);
+      alert("Erreur lors du refus de la table.");
+    } finally {
+      stopProcessing(table.id);
+    }
   }
-}
 
   async function chargerInscriptionsAnim() {
     setLoadingInscAnim(true);
@@ -1044,345 +1060,394 @@ async function refuserTable(table: TableAnimee) {
   }
 
   async function dupliquerAnimation(a: AnimationPubliee) {
-  if (processingIds.has(a.id)) return;
-  startProcessing(a.id);
-  try {
-    const nouvelleDate = ajouterJours(a.date, 7);
-    const idDoc = a.lieu
-      ? `${a.lieu}_${nouvelleDate}`
-      : `${a.lieuType === "ligne" ? "en-ligne" : "autre"}_${nouvelleDate}_${Date.now()}`;
+    if (processingIds.has(a.id)) return;
+    startProcessing(a.id);
+    try {
+      const nouvelleDate = ajouterJours(a.date, 7);
+      const idDoc = a.lieu
+        ? `${a.lieu}_${nouvelleDate}`
+        : `${a.lieuType === "ligne" ? "en-ligne" : "autre"}_${nouvelleDate}_${Date.now()}`;
 
-    const docRef = doc(db, "evenements", idDoc);
-    const existant = await getDoc(docRef);
-    if (existant.exists()) {
-      alert(`Une animation existe déjà à ce lieu le ${nouvelleDate}.`);
+      const docRef = doc(db, "evenements", idDoc);
+      const existant = await getDoc(docRef);
+      if (existant.exists()) {
+        alert(`Une animation existe déjà à ce lieu le ${nouvelleDate}.`);
+        return;
+      }
+
+      const data = nettoyerUndefined({
+        titre: a.titre,
+        categorie: "animations",
+        date: nouvelleDate,
+        heure: a.heure,
+        duree: a.duree || "",
+        niveau: a.niveau,
+        places: a.places,
+        inscrits: 0,
+        systeme: a.systeme || "",
+        tags: a.tags || [],
+        image: a.image || "",
+        lieuType: a.lieuType || "presentiel",
+        lieu: a.lieu || "",
+        ville: a.ville || "",
+        adresse: a.adresse || "",
+        lieuDetail: a.lieuDetail || "",
+        mjId: a.mjId || null,
+        mjNom: a.mjNom || "",
+        recurrent: !!a.recurrenceId,
+        recurrenceId: a.recurrenceId || null,
+        lien: lienAnimation(a.lieu, idDoc),
+        // Contenu de la page (accroche, programme, etc.) : copié tel quel
+        ...nettoyerContenu(a),
+      });
+
+      await setDoc(docRef, data);
+
+      setAnimations(prev => [...prev, { id: idDoc, ...data } as AnimationPubliee]
+        .sort((x, y) => x.date.localeCompare(y.date)));
+    } catch (err) {
+      console.error(err);
+      alert("Erreur lors de la duplication de l'animation : " + (err as any)?.message);
+    } finally {
+      stopProcessing(a.id);
+    }
+  }
+
+  async function modifierOccurrence(animation: AnimationPubliee, nouvelleDate: string, nouvelleHeure: string) {
+    if (processingIds.has(animation.id)) return;
+    if (!nouvelleDate || !nouvelleHeure) {
+      alert("Merci de renseigner une date et une heure valides.");
       return;
     }
 
-    const data = nettoyerUndefined({
-      titre: a.titre,
-      description: a.description,
-      categorie: "animations",
-      date: nouvelleDate,
-      heure: a.heure,
-      duree: a.duree || "",
-      niveau: a.niveau,
-      places: a.places,
-      inscrits: 0,
-      systeme: a.systeme || "",
-      tags: a.tags || [],
-      image: a.image || "",
-      lieuType: a.lieuType || "presentiel",
-      lieu: a.lieu || "",
-      ville: a.ville || "",
-      adresse: a.adresse || "",
-      lieuDetail: a.lieuDetail || "",
-      mjId: a.mjId || null,
-      mjNom: a.mjNom || "",
-      recurrent: !!a.recurrenceId,
-      recurrenceId: a.recurrenceId || null,
-    });
+    startProcessing(animation.id);
+    try {
+      // Si la date change, il faut migrer vers un nouvel ID déterministe
+      // ({lieu}_{date}), car l'ID actuel encode l'ancienne date.
+      const dateInchangee = nouvelleDate === animation.date;
 
-    await setDoc(docRef, data);
+      if (dateInchangee) {
+        // Juste l'heure change : simple update sur le document existant.
+        await updateDoc(doc(db, "evenements", animation.id), {
+          heure: nouvelleHeure,
+        });
+        setAnimations(prev =>
+          prev.map(a => a.id === animation.id ? { ...a, heure: nouvelleHeure } : a)
+        );
+      } else {
+        // La date change : il faut un nouvel ID pour rester cohérent avec
+        // {lieu}_{date}, donc on crée le nouveau doc et on supprime l'ancien.
+        const nouvelId = animation.lieu
+          ? `${animation.lieu}_${nouvelleDate}`
+          : `en-ligne_${nouvelleDate}_${Date.now()}`;
 
-    setAnimations(prev => [...prev, { id: idDoc, ...data } as AnimationPubliee]
-      .sort((x, y) => x.date.localeCompare(y.date)));
-  } catch (err) {
-    console.error(err);
-    alert("Erreur lors de la duplication de l'animation : " + (err as any)?.message);
-  } finally {
-    stopProcessing(a.id);
-  }
-}
-
-async function modifierOccurrence(animation: AnimationPubliee, nouvelleDate: string, nouvelleHeure: string) {
-  if (processingIds.has(animation.id)) return;
-  if (!nouvelleDate || !nouvelleHeure) {
-    alert("Merci de renseigner une date et une heure valides.");
-    return;
-  }
-
-  startProcessing(animation.id);
-  try {
-    // Si la date change, il faut migrer vers un nouvel ID déterministe
-    // ({lieu}_{date}), car l'ID actuel encode l'ancienne date.
-    const dateInchangee = nouvelleDate === animation.date;
-
-    if (dateInchangee) {
-      // Juste l'heure change : simple update sur le document existant.
-      await updateDoc(doc(db, "evenements", animation.id), {
-        heure: nouvelleHeure,
-      });
-      setAnimations(prev =>
-        prev.map(a => a.id === animation.id ? { ...a, heure: nouvelleHeure } : a)
-      );
-    } else {
-      // La date change : il faut un nouvel ID pour rester cohérent avec
-      // {lieu}_{date}, donc on crée le nouveau doc et on supprime l'ancien.
-      const nouvelId = animation.lieu
-        ? `${animation.lieu}_${nouvelleDate}`
-        : `en-ligne_${nouvelleDate}_${Date.now()}`;
-
-      if (nouvelId !== animation.id) {
-        const docExistant = await getDoc(doc(db, "evenements", nouvelId));
-        if (docExistant.exists()) {
-          alert(`Une animation existe déjà à ce lieu le ${nouvelleDate}.`);
-          stopProcessing(animation.id);
-          return;
+        if (nouvelId !== animation.id) {
+          const docExistant = await getDoc(doc(db, "evenements", nouvelId));
+          if (docExistant.exists()) {
+            alert(`Une animation existe déjà à ce lieu le ${nouvelleDate}.`);
+            stopProcessing(animation.id);
+            return;
+          }
         }
+
+        const { id, ...donnees } = animation;
+        const nouvellesDonnees = { ...donnees, date: nouvelleDate, heure: nouvelleHeure, lien: lienAnimation(animation.lieu, nouvelId) };
+
+        await setDoc(doc(db, "evenements", nouvelId), nettoyerUndefined(nouvellesDonnees));
+        await deleteDoc(doc(db, "evenements", animation.id));
+
+        setAnimations(prev =>
+          prev
+            .filter(a => a.id !== animation.id)
+            .concat([{ id: nouvelId, ...nouvellesDonnees }])
+            .sort((a, b) => a.date.localeCompare(b.date))
+        );
       }
 
-      const { id, ...donnees } = animation;
-      const nouvellesDonnees = { ...donnees, date: nouvelleDate, heure: nouvelleHeure };
-
-      await setDoc(doc(db, "evenements", nouvelId), nettoyerUndefined(nouvellesDonnees));
-      await deleteDoc(doc(db, "evenements", animation.id));
-
-      setAnimations(prev =>
-        prev
-          .filter(a => a.id !== animation.id)
-          .concat([{ id: nouvelId, ...nouvellesDonnees }])
-          .sort((a, b) => a.date.localeCompare(b.date))
-      );
+      setEditingOccurrence(null);
+    } catch (err) {
+      console.error(err);
+      alert("Erreur lors de la modification de l'occurrence.");
+    } finally {
+      stopProcessing(animation.id);
     }
-
-    setEditingOccurrence(null);
-  } catch (err) {
-    console.error(err);
-    alert("Erreur lors de la modification de l'occurrence.");
-  } finally {
-    stopProcessing(animation.id);
   }
-}
 
-function ouvrirEditionGroupe(groupe: AnimationPubliee[]) {
-  const premiere = groupe[0];
-  // Un lieu "presentiel" sans slug fixe (a.lieu vide) signifie que c'était
-  // un lieu libre : on présélectionne "autre" et on repeuple les champs
-  // ville/adresse libres à partir des valeurs déjà enregistrées.
-  const etaitLieuLibre = (premiere.lieuType || "presentiel") === "presentiel" && !premiere.lieu;
-  setEditingGroupe(groupe);
-  setEditGroupForm({
-    titre: premiere.titre,
-    description: premiere.description || "",
-    heure: premiere.heure,
-    duree: premiere.duree || "",
-    niveau: premiere.niveau,
-    systeme: premiere.systeme || "",
-    tags: (premiere.tags || []).join(", "),
-    places: premiere.places,
-    image: premiere.image || "",
-    lieuType: premiere.lieuType || "presentiel",
-    lieu: etaitLieuLibre ? "autre" : (premiere.lieu || ""),
-    lieuVilleLibre: etaitLieuLibre ? (premiere.ville || "") : "",
-    lieuAdresseLibre: etaitLieuLibre ? (premiere.adresse || "") : "",
-    lieuDetail: premiere.lieuDetail || "",
-    mjId: premiere.mjId || "",
-    mjNom: premiere.mjNom || "",
-    recurrence: premiere.recurrenceId ? "hebdomadaire" : "unique",
-  });
-}
+  function ouvrirEditionGroupe(groupe: AnimationPubliee[]) {
+    const premiere = groupe[0];
+    // Un lieu "presentiel" sans slug fixe (a.lieu vide) signifie que c'était
+    // un lieu libre : on présélectionne "autre" et on repeuple les champs
+    // ville/adresse libres à partir des valeurs déjà enregistrées.
+    const etaitLieuLibre = (premiere.lieuType || "presentiel") === "presentiel" && !premiere.lieu;
+    setEditingGroupe(groupe);
+    setEditGroupForm({
+      titre: premiere.titre,
+      description: premiere.description || "",
+      heure: premiere.heure,
+      duree: premiere.duree || "",
+      niveau: premiere.niveau,
+      systeme: premiere.systeme || "",
+      tags: (premiere.tags || []).join(", "),
+      places: premiere.places,
+      image: premiere.image || "",
+      lieuType: premiere.lieuType || "presentiel",
+      lieu: etaitLieuLibre ? "autre" : (premiere.lieu || ""),
+      lieuVilleLibre: etaitLieuLibre ? (premiere.ville || "") : "",
+      lieuAdresseLibre: etaitLieuLibre ? (premiere.adresse || "") : "",
+      lieuDetail: premiere.lieuDetail || "",
+      mjId: premiere.mjId || "",
+      mjNom: premiere.mjNom || "",
+      recurrence: premiere.recurrenceId ? "hebdomadaire" : "unique",
+    });
+    setContenuEdit({
+      accroche: premiere.accroche,
+      description: premiere.description,
+      programme: premiere.programme,
+      propose: premiere.propose,
+      tarif: premiere.tarif,
+      ageMin: premiere.ageMin,
+      debutants: premiere.debutants,
+      aApporter: premiere.aApporter,
+    });
+  }
 
-function fermerEditionGroupe() {
-  setEditingGroupe(null);
-  setEditGroupUploadPct(null);
-}
-
-async function handleEditGroupImageChange(e: React.ChangeEvent<HTMLInputElement>) {
-  const file = e.target.files?.[0];
-  if (!file) return;
-  setEditGroupUploadPct(0);
-  try {
-    const url = await uploadToCloudinary(file, setEditGroupUploadPct);
-    setEditGroupForm(f => ({ ...f, image: url }));
-  } catch (err: any) {
-    alert("Erreur lors de l'upload de l'image : " + (err.message || "inconnue"));
-  } finally {
+  function fermerEditionGroupe() {
+    setEditingGroupe(null);
     setEditGroupUploadPct(null);
   }
-}
 
-async function enregistrerModifGroupe() {
-  if (!editingGroupe) return;
-  const groupe = editingGroupe;
-  const premiere = groupe[0];
-  const cle = premiere.recurrenceId || premiere.id;
-  if (processingIds.has(cle)) return;
-
-  const estLieuLibre = editGroupForm.lieuType === "presentiel" && editGroupForm.lieu === "autre";
-
-  if (editGroupForm.lieuType === "presentiel" && !editGroupForm.lieu) {
-    alert("Merci de choisir un lieu.");
-    return;
-  }
-  if (estLieuLibre && !editGroupForm.lieuVilleLibre) {
-    alert("Merci de renseigner la ville du lieu libre.");
-    return;
+  async function handleEditGroupImageChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setEditGroupUploadPct(0);
+    try {
+      const url = await uploadToCloudinary(file, setEditGroupUploadPct);
+      setEditGroupForm(f => ({ ...f, image: url }));
+    } catch (err: any) {
+      alert("Erreur lors de l'upload de l'image : " + (err.message || "inconnue"));
+    } finally {
+      setEditGroupUploadPct(null);
+    }
   }
 
-  startProcessing(cle);
-  setSavingGroup(true);
-  try {
-    const etaitRecurrent = !!premiere.recurrenceId;
-    const doitEtreRecurrent = editGroupForm.recurrence === "hebdomadaire";
-    const lieuInfo = editGroupForm.lieu && editGroupForm.lieu !== "autre" ? LIEUX[editGroupForm.lieu] : undefined;
-    const villeFinale = estLieuLibre ? editGroupForm.lieuVilleLibre : (lieuInfo?.ville || "");
-    const adresseFinale = estLieuLibre ? editGroupForm.lieuAdresseLibre : (lieuInfo?.adresse || "");
-    const lieuSlugFinal = estLieuLibre ? "" : editGroupForm.lieu;
-    const tags = editGroupForm.tags.split(",").map(t => t.trim()).filter(Boolean);
+  async function enregistrerModifGroupe() {
+    if (!editingGroupe) return;
+    const groupe = editingGroupe;
+    const premiere = groupe[0];
+    const cle = premiere.recurrenceId || premiere.id;
+    if (processingIds.has(cle)) return;
 
-    // Champs communs à toutes les occurrences de la série (tout sauf la
-    // date, qui reste propre à chaque occurrence).
-    const champsCommuns = {
-      titre: editGroupForm.titre,
-      description: editGroupForm.description,
-      heure: editGroupForm.heure,
-      duree: editGroupForm.duree,
-      niveau: editGroupForm.niveau,
-      systeme: editGroupForm.systeme,
-      tags,
-      places: editGroupForm.places,
-      image: editGroupForm.image || "",
-      lieuType: editGroupForm.lieuType,
-      lieu: lieuSlugFinal || "",
-      ville: villeFinale,
-      adresse: adresseFinale,
-      lieuDetail: editGroupForm.lieuDetail || "",
-      mjId: editGroupForm.mjId || null,
-      mjNom: editGroupForm.mjNom || "",
-    };
+    const estLieuLibre = editGroupForm.lieuType === "presentiel" && editGroupForm.lieu === "autre";
 
-    // ── Cas 1 : la récurrence ne change pas → mise à jour de tous les
-    // champs sur toutes les occurrences déjà existantes de la série ───────
-    if (etaitRecurrent === doitEtreRecurrent) {
-      const idsAMettreAJour = etaitRecurrent
-        ? (await getDocs(
-            query(collection(db, "evenements"), where("recurrenceId", "==", premiere.recurrenceId))
-          )).docs.map(d => d.id)
-        : [premiere.id];
-
-      await Promise.all(
-        idsAMettreAJour.map(id =>
-          updateDoc(doc(db, "evenements", id), nettoyerUndefined(champsCommuns))
-        )
-      );
-
-      setAnimations(prev => prev.map(a =>
-        idsAMettreAJour.includes(a.id) ? ({ ...a, ...champsCommuns } as AnimationPubliee) : a
-      ));
+    if (editGroupForm.lieuType === "presentiel" && !editGroupForm.lieu) {
+      alert("Merci de choisir un lieu.");
+      return;
+    }
+    if (estLieuLibre && !editGroupForm.lieuVilleLibre) {
+      alert("Merci de renseigner la ville du lieu libre.");
+      return;
     }
 
-    // ── Cas 2 : passage de "unique" à "hebdomadaire" → on garde l'occurrence
-    // existante et on génère les dates suivantes sur le mois à venir ────────
-    else if (!etaitRecurrent && doitEtreRecurrent) {
-      const nouveauRecurrenceId = `rec_${Date.now()}`;
-      await updateDoc(doc(db, "evenements", premiere.id), nettoyerUndefined({
-        ...champsCommuns,
-        recurrent: true,
-        recurrenceId: nouveauRecurrenceId,
-      }));
+    startProcessing(cle);
+    setSavingGroup(true);
+    try {
+      const etaitRecurrent = !!premiere.recurrenceId;
+      const doitEtreRecurrent = editGroupForm.recurrence === "hebdomadaire";
+      const lieuInfo = editGroupForm.lieu && editGroupForm.lieu !== "autre" ? LIEUX[editGroupForm.lieu] : undefined;
+      const villeFinale = estLieuLibre ? editGroupForm.lieuVilleLibre : (lieuInfo?.ville || "");
+      const adresseFinale = estLieuLibre ? editGroupForm.lieuAdresseLibre : (lieuInfo?.adresse || "");
+      const lieuSlugFinal = estLieuLibre ? "" : editGroupForm.lieu;
+      const tags = editGroupForm.tags.split(",").map(t => t.trim()).filter(Boolean);
 
-      const nouvelles: AnimationPubliee[] = [];
-      let courante = premiere.date;
-      while (true) {
-        courante = ajouterJours(courante, 7);
-        if (!estDansLeMoisAVenir(courante)) break;
+      // Champs communs à toutes les occurrences de la série (tout sauf la
+      // date, qui reste propre à chaque occurrence). Le contenu de la page
+      // (description, accroche, programme…) est lui aussi commun à la série.
+      const champsCommuns = {
+        titre: editGroupForm.titre,
+        heure: editGroupForm.heure,
+        duree: editGroupForm.duree,
+        niveau: editGroupForm.niveau,
+        systeme: editGroupForm.systeme,
+        tags,
+        places: editGroupForm.places,
+        image: editGroupForm.image || "",
+        lieuType: editGroupForm.lieuType,
+        lieu: lieuSlugFinal || "",
+        ville: villeFinale,
+        adresse: adresseFinale,
+        lieuDetail: editGroupForm.lieuDetail || "",
+        mjId: editGroupForm.mjId || null,
+        mjNom: editGroupForm.mjNom || "",
+        ...nettoyerContenu(contenuEdit),
+      };
 
-         const idDoc = lieuSlugFinal
-          ? `${lieuSlugFinal}_${courante}`
-          : `${estLieuLibre ? "autre" : "en-ligne"}_${courante}_${Date.now()}`;
-        const existant = await getDoc(doc(db, "evenements", idDoc));
-        if (existant.exists()) continue;
+      // ── Cas 1 : la récurrence ne change pas → mise à jour de tous les
+      // champs sur toutes les occurrences déjà existantes de la série ───────
+      if (etaitRecurrent === doitEtreRecurrent) {
+        const idsAMettreAJour = etaitRecurrent
+          ? (await getDocs(
+              query(collection(db, "evenements"), where("recurrenceId", "==", premiere.recurrenceId))
+            )).docs.map(d => d.id)
+          : [premiere.id];
 
-        const data = nettoyerUndefined({
-          ...champsCommuns,
-          categorie: "animations",
-          date: courante,
-          inscrits: 0,
-          recurrent: true,
-          recurrenceId: nouveauRecurrenceId,
-        });
-        await setDoc(doc(db, "evenements", idDoc), data);
-        nouvelles.push({ id: idDoc, ...data } as AnimationPubliee);
+        await Promise.all(
+          idsAMettreAJour.map(id =>
+            updateDoc(doc(db, "evenements", id), nettoyerUndefined({ ...champsCommuns, lien: lienAnimation(lieuSlugFinal, id) }))
+          )
+        );
+
+        setAnimations(prev => prev.map(a =>
+          idsAMettreAJour.includes(a.id) ? ({ ...a, ...champsCommuns, lien: lienAnimation(lieuSlugFinal, a.id) } as AnimationPubliee) : a
+        ));
       }
 
-      setAnimations(prev =>
-        [
-          ...prev.map(a => a.id === premiere.id
-            ? ({ ...a, ...champsCommuns, recurrent: true, recurrenceId: nouveauRecurrenceId } as AnimationPubliee)
-            : a),
-          ...nouvelles,
-        ].sort((a, b) => a.date.localeCompare(b.date))
-      );
+      // ── Cas 2 : passage de "unique" à "hebdomadaire" → on garde l'occurrence
+      // existante et on génère les dates suivantes sur le mois à venir ────────
+      else if (!etaitRecurrent && doitEtreRecurrent) {
+        const nouveauRecurrenceId = `rec_${Date.now()}`;
+        await updateDoc(doc(db, "evenements", premiere.id), nettoyerUndefined({
+          ...champsCommuns,
+          recurrent: true,
+          recurrenceId: nouveauRecurrenceId,
+          lien: lienAnimation(lieuSlugFinal, premiere.id),
+        }));
+
+        const nouvelles: AnimationPubliee[] = [];
+        let courante = premiere.date;
+        while (true) {
+          courante = ajouterJours(courante, 7);
+          if (!estDansLeMoisAVenir(courante)) break;
+
+          const idDoc = lieuSlugFinal
+            ? `${lieuSlugFinal}_${courante}`
+            : `${estLieuLibre ? "autre" : "en-ligne"}_${courante}_${Date.now()}`;
+          const existant = await getDoc(doc(db, "evenements", idDoc));
+          if (existant.exists()) continue;
+
+          const data = nettoyerUndefined({
+            ...champsCommuns,
+            categorie: "animations",
+            date: courante,
+            inscrits: 0,
+            recurrent: true,
+            recurrenceId: nouveauRecurrenceId,
+            lien: lienAnimation(lieuSlugFinal, idDoc),
+          });
+          await setDoc(doc(db, "evenements", idDoc), data);
+          nouvelles.push({ id: idDoc, ...data } as AnimationPubliee);
+        }
+
+        setAnimations(prev =>
+          [
+            ...prev.map(a => a.id === premiere.id
+              ? ({ ...a, ...champsCommuns, recurrent: true, recurrenceId: nouveauRecurrenceId, lien: lienAnimation(lieuSlugFinal, a.id) } as AnimationPubliee)
+              : a),
+            ...nouvelles,
+          ].sort((a, b) => a.date.localeCompare(b.date))
+        );
+      }
+
+      // ── Cas 3 : passage de "hebdomadaire" à "unique" → on ne garde que la
+      // première occurrence, on supprime les autres dates de la série ────────
+      else {
+        const confirmation = confirm(
+          "Repasser cette série en « une seule fois » supprimera toutes les autres dates déjà générées. Continuer ?"
+        );
+        if (!confirmation) { setSavingGroup(false); stopProcessing(cle); return; }
+
+        const autresOccurrences = groupe.filter(a => a.id !== premiere.id);
+        await Promise.all(autresOccurrences.map(a => deleteDoc(doc(db, "evenements", a.id))));
+
+        await updateDoc(doc(db, "evenements", premiere.id), nettoyerUndefined({
+          ...champsCommuns,
+          recurrent: false,
+          recurrenceId: null,
+          lien: lienAnimation(lieuSlugFinal, premiere.id),
+        }));
+
+        setAnimations(prev =>
+          prev
+            .filter(a => !autresOccurrences.some(o => o.id === a.id))
+            .map(a => a.id === premiere.id
+              ? ({ ...a, ...champsCommuns, recurrent: false, recurrenceId: undefined, lien: lienAnimation(lieuSlugFinal, a.id) } as AnimationPubliee)
+              : a)
+        );
+      }
+
+      setEditingGroupe(null);
+    } catch (err: any) {
+      console.error(err);
+      alert("Erreur lors de la modification : " + (err.message || "inconnue"));
+    } finally {
+      setSavingGroup(false);
+      stopProcessing(cle);
     }
+  }
 
-    // ── Cas 3 : passage de "hebdomadaire" à "unique" → on ne garde que la
-    // première occurrence, on supprime les autres dates de la série ────────
-    else {
-      const confirmation = confirm(
-        "Repasser cette série en « une seule fois » supprimera toutes les autres dates déjà générées. Continuer ?"
-      );
-      if (!confirmation) { setSavingGroup(false); stopProcessing(cle); return; }
+  // Supprime définitivement une animation (ou toute une série récurrente
+  // avec l'ensemble de ses occurrences déjà générées en base).
+  async function annulerAnimation(groupe: AnimationPubliee[]) {
+    const premiere = groupe[0];
+    const cle = premiere.recurrenceId || premiere.id;
+    if (processingIds.has(cle)) return;
 
-      const autresOccurrences = groupe.filter(a => a.id !== premiere.id);
-      await Promise.all(autresOccurrences.map(a => deleteDoc(doc(db, "evenements", a.id))));
+    const nb = groupe.length;
+    const confirmation = confirm(
+      premiere.recurrenceId
+        ? `Supprimer définitivement cette série récurrente et ses ${nb} occurrence${nb > 1 ? "s" : ""} ? Cette action est irréversible.`
+        : "Supprimer définitivement cette animation ? Cette action est irréversible."
+    );
+    if (!confirmation) return;
 
-      await updateDoc(doc(db, "evenements", premiere.id), nettoyerUndefined({
-        ...champsCommuns,
-        recurrent: false,
-        recurrenceId: null,
-      }));
-
-      setAnimations(prev =>
-        prev
-          .filter(a => !autresOccurrences.some(o => o.id === a.id))
-          .map(a => a.id === premiere.id
-            ? ({ ...a, ...champsCommuns, recurrent: false, recurrenceId: undefined } as AnimationPubliee)
-            : a)
-      );
+    startProcessing(cle);
+    try {
+      await Promise.all(groupe.map(a => deleteDoc(doc(db, "evenements", a.id))));
+      setAnimations(prev => prev.filter(a => !groupe.some(g => g.id === a.id)));
+      setEditingGroupe(curr => {
+        if (!curr) return curr;
+        const curCle = curr[0].recurrenceId || curr[0].id;
+        return curCle === cle ? null : curr;
+      });
+    } catch (err) {
+      console.error(err);
+      alert("Erreur lors de la suppression de l'animation.");
+    } finally {
+      stopProcessing(cle);
     }
-
-    setEditingGroupe(null);
-  } catch (err: any) {
-    console.error(err);
-    alert("Erreur lors de la modification : " + (err.message || "inconnue"));
-  } finally {
-    setSavingGroup(false);
-    stopProcessing(cle);
   }
-}
 
-// Supprime définitivement une animation (ou toute une série récurrente
-// avec l'ensemble de ses occurrences déjà générées en base).
-async function annulerAnimation(groupe: AnimationPubliee[]) {
-  const premiere = groupe[0];
-  const cle = premiere.recurrenceId || premiere.id;
-  if (processingIds.has(cle)) return;
+  // ── Liens directs vers la page publique d'une animation ───────────────────
 
-  const nb = groupe.length;
-  const confirmation = confirm(
-    premiere.recurrenceId
-      ? `Supprimer définitivement cette série récurrente et ses ${nb} occurrence${nb > 1 ? "s" : ""} ? Cette action est irréversible.`
-      : "Supprimer définitivement cette animation ? Cette action est irréversible."
-  );
-  if (!confirmation) return;
-
-  startProcessing(cle);
-  try {
-    await Promise.all(groupe.map(a => deleteDoc(doc(db, "evenements", a.id))));
-    setAnimations(prev => prev.filter(a => !groupe.some(g => g.id === a.id)));
-    setEditingGroupe(curr => {
-      if (!curr) return curr;
-      const curCle = curr[0].recurrenceId || curr[0].id;
-      return curCle === cle ? null : curr;
-    });
-  } catch (err) {
-    console.error(err);
-    alert("Erreur lors de la suppression de l'animation.");
-  } finally {
-    stopProcessing(cle);
+  async function copierLien(a: AnimationPubliee) {
+    const url = window.location.origin + (a.lien || lienAnimation(a.lieu, a.id));
+    try {
+      await navigator.clipboard.writeText(url);
+      setLienCopie(a.id);
+      setTimeout(() => setLienCopie(c => (c === a.id ? null : c)), 2000);
+    } catch {
+      window.prompt("Copiez ce lien :", url);
+    }
   }
-}
+
+  // Pour les animations créées avant l'ajout du champ "lien".
+  async function genererLiensManquants() {
+    const manquantes = animations.filter(a => !a.lien);
+    if (manquantes.length === 0 || processingIds.has("liens")) return;
+    startProcessing("liens");
+    try {
+      await Promise.all(
+        manquantes.map(a =>
+          updateDoc(doc(db, "evenements", a.id), { lien: lienAnimation(a.lieu, a.id) })
+        )
+      );
+      setAnimations(prev => prev.map(a => a.lien ? a : { ...a, lien: lienAnimation(a.lieu, a.id) }));
+    } catch (err) {
+      console.error(err);
+      alert("Erreur lors de la génération des liens.");
+    } finally {
+      stopProcessing("liens");
+    }
+  }
 
   // ── Auth ──────────────────────────────────────────────────────────────────
 
@@ -1532,16 +1597,16 @@ async function annulerAnimation(groupe: AnimationPubliee[]) {
         // disparaissaient silencieusement. On les reporte désormais tels
         // quels, avec des valeurs de repli pour les anciennes propositions
         // qui ne les avaient pas encore.
-        type:           event.type || "one-shot",
-        systeme:        event.systeme || "",
-        mjNom:          event.mjNom || event.organisateur || "",
-        lieuType:       event.lieuType || "presentiel",
-        lieuDetail:     event.lieuDetail || "",
+        type: event.type || "one-shot",
+        systeme: event.systeme || "",
+        mjNom: event.mjNom || event.organisateur || "",
+        lieuType: event.lieuType || "presentiel",
+        lieuDetail: event.lieuDetail || "",
         lieuComplement: event.lieuComplement || "",
-        ville:          event.ville || "",
-        duree:          event.duree || "",
-        personnages:    event.personnages || "pretires",
-        ageTag:         event.ageTag || "tous",
+        ville: event.ville || "",
+        duree: event.duree || "",
+        personnages: event.personnages || "pretires",
+        ageTag: event.ageTag || "tous",
       });
       await deleteDoc(doc(db, "propositions_evenements", event.id));
       // Mise à jour optimiste : on retire l'item localement sans refaire
@@ -1574,159 +1639,127 @@ async function annulerAnimation(groupe: AnimationPubliee[]) {
   // ── Actions animations (créées directement par l'admin) ───────────────────
 
   async function creerAnimation(e: React.FormEvent) {
-  e.preventDefault();
+    e.preventDefault();
 
-  const estLieuLibre = formAnim.lieuType === "presentiel" && formAnim.lieu === "autre";
-  const lieuRequis = formAnim.lieuType === "presentiel";
+    const estLieuLibre = formAnim.lieuType === "presentiel" && formAnim.lieu === "autre";
+    const lieuRequis = formAnim.lieuType === "presentiel";
 
-  if (
-    !formAnim.titre || !formAnim.date || !formAnim.heure || !formAnim.mjId ||
-    (lieuRequis && !formAnim.lieu) ||
-    (estLieuLibre && !formAnim.lieuVilleLibre)
-  ) {
-    setMessageAnim({
-      type: "err",
-      text: estLieuLibre
-        ? "Merci de renseigner au moins le titre, la date, l'heure, la ville du lieu libre et le MJ référent."
-        : lieuRequis
-          ? "Merci de renseigner au moins le titre, la date, l'heure, le lieu et le MJ référent."
-          : "Merci de renseigner au moins le titre, la date, l'heure et le MJ référent.",
-    });
-    return;
-  }
-  setSubmittingAnim(true);
-  setMessageAnim(null);
-  try {
-    const tags = formAnim.tags.split(",").map(t => t.trim()).filter(Boolean);
-    const lieuInfo = formAnim.lieu && formAnim.lieu !== "autre" ? LIEUX[formAnim.lieu] : undefined;
-    const villeFinale = estLieuLibre ? formAnim.lieuVilleLibre : (lieuInfo?.ville || "");
-    const adresseFinale = estLieuLibre ? formAnim.lieuAdresseLibre : (lieuInfo?.adresse || "");
-    const lieuSlugFinal = estLieuLibre ? "" : formAnim.lieu;
-
-    // ── Calcul des dates à créer ──────────────────────────────────────────
-    const dates: string[] = [formAnim.date];
-    if (formAnim.recurrence === "hebdomadaire") {
-      let courante = formAnim.date;
-      while (true) {
-        courante = ajouterJours(courante, 7);
-        if (!estDansLeMoisAVenir(courante)) break;
-        dates.push(courante);
-      }
+    if (
+      !formAnim.titre || !formAnim.date || !formAnim.heure || !formAnim.mjId ||
+      (lieuRequis && !formAnim.lieu) ||
+      (estLieuLibre && !formAnim.lieuVilleLibre)
+    ) {
+      setMessageAnim({
+        type: "err",
+        text: estLieuLibre
+          ? "Merci de renseigner au moins le titre, la date, l'heure, la ville du lieu libre et le MJ référent."
+          : lieuRequis
+            ? "Merci de renseigner au moins le titre, la date, l'heure, le lieu et le MJ référent."
+            : "Merci de renseigner au moins le titre, la date, l'heure et le MJ référent.",
+      });
+      return;
     }
+    setSubmittingAnim(true);
+    setMessageAnim(null);
+    try {
+      const tags = formAnim.tags.split(",").map(t => t.trim()).filter(Boolean);
+      const lieuInfo = formAnim.lieu && formAnim.lieu !== "autre" ? LIEUX[formAnim.lieu] : undefined;
+      const villeFinale = estLieuLibre ? formAnim.lieuVilleLibre : (lieuInfo?.ville || "");
+      const adresseFinale = estLieuLibre ? formAnim.lieuAdresseLibre : (lieuInfo?.adresse || "");
+      const lieuSlugFinal = estLieuLibre ? "" : formAnim.lieu;
 
-    const recurrenceId = formAnim.recurrence === "hebdomadaire"
-      ? `rec_${Date.now()}`
-      : undefined;
-
-    const nouvelles: AnimationPubliee[] = [];
-    const datesIgnorees: string[] = [];
-
-    for (const dateOcc of dates) {
-      // ── ID déterministe : {lieu}_{date} pour un lieu fixe (permet la
-      // dédup naturelle) ; ID aléatoire pour "en ligne" ou "lieu libre",
-      // puisqu'on ne peut pas dédupliquer sur un texte libre.
-      const idDoc = (formAnim.lieuType === "presentiel" && lieuSlugFinal)
-        ? `${lieuSlugFinal}_${dateOcc}`
-        : `${estLieuLibre ? "autre" : "en-ligne"}_${dateOcc}_${Date.now()}`;
-
-      const docRef = doc(db, "evenements", idDoc);
-      const existant = await getDoc(docRef);
-      if (existant.exists()) {
-        datesIgnorees.push(dateOcc);
-        continue;
-      }
-
-      const data = {
-        titre: formAnim.titre,
-        description: formAnim.description,
-        categorie: "animations",
-        date: dateOcc,
-        heure: formAnim.heure,
-        duree: formAnim.duree,
-        niveau: formAnim.niveau,
-        places: formAnim.places,
-        inscrits: 0,
-        systeme: formAnim.systeme,
-        tags,
-        image: formAnim.image,
-        lieuType: formAnim.lieuType,
-        lieu: lieuSlugFinal || "",
-        ville: villeFinale,
-        adresse: adresseFinale,
-        lieuDetail: formAnim.lieuDetail,
-        mjId: formAnim.mjId || null,
-        mjNom: formAnim.mjNom,
-        recurrent: formAnim.recurrence === "hebdomadaire",
-        recurrenceId: recurrenceId || null,
-      };
-
-      await setDoc(docRef, nettoyerUndefined(data));
-
-      nouvelles.push({ id: idDoc, ...data } as AnimationPubliee);
-    }
-
-    setAnimations(prev =>
-      [...prev, ...nouvelles].sort((a, b) => a.date.localeCompare(b.date))
-    );
-
-    const texteIgnorees = datesIgnorees.length > 0
-      ? ` (${datesIgnorees.length} date${datesIgnorees.length > 1 ? "s" : ""} ignorée${datesIgnorees.length > 1 ? "s" : ""} car déjà existante${datesIgnorees.length > 1 ? "s" : ""} à ce lieu)`
-      : "";
-
-    setMessageAnim({
-      type: "ok",
-      text: dates.length > 1
-        ? `Animation créée : ${nouvelles.length} occurrence${nouvelles.length > 1 ? "s" : ""} générée${nouvelles.length > 1 ? "s" : ""}${texteIgnorees}.`
-        : nouvelles.length > 0
-          ? "Animation créée !"
-          : `Une animation existe déjà à ce lieu pour cette date.`,
-    });
-
-    if (nouvelles.length > 0) setFormAnim(FORM_ANIMATION_VIDE);
-  } catch (err) {
-    console.error(err);
-    setMessageAnim({ type: "err", text: "Erreur lors de la création de l'animation." });
-  } finally {
-    setSubmittingAnim(false);
-  }
-}
-
-const CLOUDINARY_CLOUD_NAME    = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME!;
-const CLOUDINARY_UPLOAD_PRESET = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET!;
-
-async function uploadToCloudinary(
-  file: File,
-  onProgress: (pct: number) => void
-): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
-
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`);
-
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
-    };
-
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        try {
-          const data = JSON.parse(xhr.responseText);
-          resolve(data.secure_url as string);
-        } catch (err) {
-          reject(err);
+      // ── Calcul des dates à créer ──────────────────────────────────────────
+      const dates: string[] = [formAnim.date];
+      if (formAnim.recurrence === "hebdomadaire") {
+        let courante = formAnim.date;
+        while (true) {
+          courante = ajouterJours(courante, 7);
+          if (!estDansLeMoisAVenir(courante)) break;
+          dates.push(courante);
         }
-      } else {
-        reject(new Error(`Échec de l'upload Cloudinary (${xhr.status})`));
       }
-    };
-    xhr.onerror = () => reject(new Error("Échec de l'upload Cloudinary"));
 
-    xhr.send(formData);
-  });
-}
+      const recurrenceId = formAnim.recurrence === "hebdomadaire"
+        ? `rec_${Date.now()}`
+        : undefined;
+
+      const nouvelles: AnimationPubliee[] = [];
+      const datesIgnorees: string[] = [];
+
+      for (const dateOcc of dates) {
+        // ── ID déterministe : {lieu}_{date} pour un lieu fixe (permet la
+        // dédup naturelle) ; ID aléatoire pour "en ligne" ou "lieu libre",
+        // puisqu'on ne peut pas dédupliquer sur un texte libre.
+        const idDoc = (formAnim.lieuType === "presentiel" && lieuSlugFinal)
+          ? `${lieuSlugFinal}_${dateOcc}`
+          : `${estLieuLibre ? "autre" : "en-ligne"}_${dateOcc}_${Date.now()}`;
+
+        const docRef = doc(db, "evenements", idDoc);
+        const existant = await getDoc(docRef);
+        if (existant.exists()) {
+          datesIgnorees.push(dateOcc);
+          continue;
+        }
+
+        const data = {
+          titre: formAnim.titre,
+          categorie: "animations",
+          date: dateOcc,
+          heure: formAnim.heure,
+          duree: formAnim.duree,
+          niveau: formAnim.niveau,
+          places: formAnim.places,
+          inscrits: 0,
+          systeme: formAnim.systeme,
+          tags,
+          image: formAnim.image,
+          lieuType: formAnim.lieuType,
+          lieu: lieuSlugFinal || "",
+          ville: villeFinale,
+          adresse: adresseFinale,
+          lieuDetail: formAnim.lieuDetail,
+          mjId: formAnim.mjId || null,
+          mjNom: formAnim.mjNom,
+          recurrent: formAnim.recurrence === "hebdomadaire",
+          recurrenceId: recurrenceId || null,
+          lien: lienAnimation(lieuSlugFinal, idDoc),
+          // Contenu de la page (description, accroche, programme…)
+          ...nettoyerContenu(contenuAnim),
+        };
+
+        await setDoc(docRef, nettoyerUndefined(data));
+
+        nouvelles.push({ id: idDoc, ...data } as AnimationPubliee);
+      }
+
+      setAnimations(prev =>
+        [...prev, ...nouvelles].sort((a, b) => a.date.localeCompare(b.date))
+      );
+
+      const texteIgnorees = datesIgnorees.length > 0
+        ? ` (${datesIgnorees.length} date${datesIgnorees.length > 1 ? "s" : ""} ignorée${datesIgnorees.length > 1 ? "s" : ""} car déjà existante${datesIgnorees.length > 1 ? "s" : ""} à ce lieu)`
+        : "";
+
+      setMessageAnim({
+        type: "ok",
+        text: dates.length > 1
+          ? `Animation créée : ${nouvelles.length} occurrence${nouvelles.length > 1 ? "s" : ""} générée${nouvelles.length > 1 ? "s" : ""}${texteIgnorees}.`
+          : nouvelles.length > 0
+            ? "Animation créée !"
+            : `Une animation existe déjà à ce lieu pour cette date.`,
+      });
+
+      if (nouvelles.length > 0) {
+        setFormAnim(FORM_ANIMATION_VIDE);
+        setContenuAnim({});
+      }
+    } catch (err) {
+      console.error(err);
+      setMessageAnim({ type: "err", text: "Erreur lors de la création de l'animation." });
+    } finally {
+      setSubmittingAnim(false);
+    }
+  }
 
   // ── Actions ressources (ajout direct par l'admin) ─────────────────────────
 
@@ -1812,7 +1845,7 @@ async function uploadToCloudinary(
   // ── Rendu ─────────────────────────────────────────────────────────────────
 
   if (checkingAuth) return null;
-  if (!authorized)  return null;
+  if (!authorized) return null;
 
   return (
     <Page>
@@ -1823,52 +1856,29 @@ async function uploadToCloudinary(
       </Hero>
 
       <Tabs>
-        <Tab
-          $active={onglet === "comptes"}
-          onClick={() => setOnglet("comptes")}
-        >
+        <Tab $active={onglet === "comptes"} onClick={() => setOnglet("comptes")}>
           👥 Comptes
           {pendingUsers.length > 0 && <Badge>{pendingUsers.length}</Badge>}
         </Tab>
-        <Tab
-          $active={onglet === "membres"}
-          onClick={() => setOnglet("membres")}
-        >
+        <Tab $active={onglet === "membres"} onClick={() => setOnglet("membres")}>
           🧑‍🤝‍🧑 Membres
           <Badge>{membres.length}</Badge>
         </Tab>
-        <Tab
-          $active={onglet === "evenements"}
-          onClick={() => setOnglet("evenements")}
-        >
+        <Tab $active={onglet === "evenements"} onClick={() => setOnglet("evenements")}>
           📬 Événements
           {propositions.length > 0 && <Badge>{propositions.length}</Badge>}
         </Tab>
-        <Tab
-          $active={onglet === "animations"}
-          onClick={() => setOnglet("animations")}
-        >
+        <Tab $active={onglet === "animations"} onClick={() => setOnglet("animations")}>
           🎭 Animations
         </Tab>
-        <Tab
-          $active={onglet === "tables"}
-          onClick={() => setOnglet("tables")}
-        >
+        <Tab $active={onglet === "tables"} onClick={() => setOnglet("tables")}>
           🎲 Tables
-          {tables.filter(t => t.places > 0 && (t as any).statut === "pending").length > 0 && (
-            <Badge>{tables.filter(t => (t as any).statut === "pending").length}</Badge>
-          )}
+          {nbTablesEnAttente > 0 && <Badge>{nbTablesEnAttente}</Badge>}
         </Tab>
-        <Tab
-          $active={onglet === "inscriptions-anim"}
-          onClick={() => setOnglet("inscriptions-anim")}
-        >
+        <Tab $active={onglet === "inscriptions-anim"} onClick={() => setOnglet("inscriptions-anim")}>
           📋 Inscriptions animations
         </Tab>
-        <Tab
-          $active={onglet === "ressources"}
-          onClick={() => setOnglet("ressources")}
-        >
+        <Tab $active={onglet === "ressources"} onClick={() => setOnglet("ressources")}>
           📚 Ressources
           {propositionsRessources.length > 0 && <Badge>{propositionsRessources.length}</Badge>}
         </Tab>
@@ -2035,7 +2045,9 @@ async function uploadToCloudinary(
       {/* ── Onglet Animations (création directe par l'admin) ── */}
       {onglet === "animations" && (
         <RessourcesLayout>
-          <FormCard>
+          {/* position: static → le formulaire est long, une carte "sticky"
+              plus haute que l'écran rendrait le bouton de création inatteignable. */}
+          <FormCard style={{ position: "static" }}>
             <FormTitle>✚ Créer une animation</FormTitle>
             <form onSubmit={creerAnimation}>
               <Field>
@@ -2048,15 +2060,7 @@ async function uploadToCloudinary(
                 />
               </Field>
 
-              <Field>
-                <Label htmlFor="a-desc">Description</Label>
-                <Input
-                  id="a-desc"
-                  placeholder="Pitch de la soirée"
-                  value={formAnim.description}
-                  onChange={e => setFormAnim(f => ({ ...f, description: e.target.value }))}
-                />
-              </Field>
+              <ContenuAnimationFields value={contenuAnim} onChange={setContenuAnim} />
 
               <Field>
                 <Label htmlFor="a-date">Date *</Label>
@@ -2101,54 +2105,54 @@ async function uploadToCloudinary(
               </Field>
 
               {formAnim.lieuType === "presentiel" ? (
-  <Field>
-    <Label htmlFor="a-lieu">Lieu *</Label>
-    <Select
-      id="a-lieu"
-      value={formAnim.lieu}
-      onChange={e => setFormAnim(f => ({ ...f, lieu: e.target.value }))}
-    >
-      <option value="">— Choisir un lieu —</option>
-      {Object.entries(LIEUX).map(([slug, info]) => (
-        <option key={slug} value={slug}>{info.label}</option>
-      ))}
-      <option value="autre">📝 Autre lieu (à préciser)</option>
-    </Select>
-  </Field>
-) : (
-  <Field>
-    <Label htmlFor="a-lieuDetail">Outil / lien</Label>
-    <Input
-      id="a-lieuDetail"
-      placeholder="Ex : Discord, Roll20…"
-      value={formAnim.lieuDetail}
-      onChange={e => setFormAnim(f => ({ ...f, lieuDetail: e.target.value }))}
-    />
-  </Field>
-)}
+                <Field>
+                  <Label htmlFor="a-lieu">Lieu *</Label>
+                  <Select
+                    id="a-lieu"
+                    value={formAnim.lieu}
+                    onChange={e => setFormAnim(f => ({ ...f, lieu: e.target.value }))}
+                  >
+                    <option value="">— Choisir un lieu —</option>
+                    {Object.entries(LIEUX).map(([slug, info]) => (
+                      <option key={slug} value={slug}>{info.label}</option>
+                    ))}
+                    <option value="autre">📝 Autre lieu (à préciser)</option>
+                  </Select>
+                </Field>
+              ) : (
+                <Field>
+                  <Label htmlFor="a-lieuDetail">Outil / lien</Label>
+                  <Input
+                    id="a-lieuDetail"
+                    placeholder="Ex : Discord, Roll20…"
+                    value={formAnim.lieuDetail}
+                    onChange={e => setFormAnim(f => ({ ...f, lieuDetail: e.target.value }))}
+                  />
+                </Field>
+              )}
 
-{formAnim.lieuType === "presentiel" && formAnim.lieu === "autre" && (
-  <>
-    <Field>
-      <Label htmlFor="a-lieu-ville">Ville *</Label>
-      <Input
-        id="a-lieu-ville"
-        placeholder="Ex : Saint-Denis"
-        value={formAnim.lieuVilleLibre}
-        onChange={e => setFormAnim(f => ({ ...f, lieuVilleLibre: e.target.value }))}
-      />
-    </Field>
-    <Field>
-      <Label htmlFor="a-lieu-adresse">Adresse / précisions</Label>
-      <Input
-        id="a-lieu-adresse"
-        placeholder="Ex : 12 rue de la Paix"
-        value={formAnim.lieuAdresseLibre}
-        onChange={e => setFormAnim(f => ({ ...f, lieuAdresseLibre: e.target.value }))}
-      />
-    </Field>
-  </>
-)}
+              {formAnim.lieuType === "presentiel" && formAnim.lieu === "autre" && (
+                <>
+                  <Field>
+                    <Label htmlFor="a-lieu-ville">Ville *</Label>
+                    <Input
+                      id="a-lieu-ville"
+                      placeholder="Ex : Saint-Denis"
+                      value={formAnim.lieuVilleLibre}
+                      onChange={e => setFormAnim(f => ({ ...f, lieuVilleLibre: e.target.value }))}
+                    />
+                  </Field>
+                  <Field>
+                    <Label htmlFor="a-lieu-adresse">Adresse / précisions</Label>
+                    <Input
+                      id="a-lieu-adresse"
+                      placeholder="Ex : 12 rue de la Paix"
+                      value={formAnim.lieuAdresseLibre}
+                      onChange={e => setFormAnim(f => ({ ...f, lieuAdresseLibre: e.target.value }))}
+                    />
+                  </Field>
+                </>
+              )}
 
               <Field>
                 <Label htmlFor="a-recurrence">Répétition</Label>
@@ -2184,35 +2188,35 @@ async function uploadToCloudinary(
               </Field>
 
               <Field>
-  <Label htmlFor="a-image">Image de l'animation</Label>
-  {formAnim.image && (
-    <ImagePreviewWrap>
-      <ImagePreviewImg src={formAnim.image} alt="Aperçu" />
-    </ImagePreviewWrap>
-  )}
-  <UploadLabel htmlFor="a-image-upload" style={{ marginTop: formAnim.image ? "0.5rem" : 0 }}>
-    🖼️ {formAnim.image ? "Changer l'image" : "Téléverser une image"}
-    <HiddenFileInput
-      id="a-image-upload"
-      type="file"
-      accept="image/*"
-      onChange={async (e) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        setFormAnimUploadPct(0);
-        try {
-          const url = await uploadToCloudinary(file, setFormAnimUploadPct);
-          setFormAnim(f => ({ ...f, image: url }));
-        } catch (err: any) {
-          alert("Erreur lors de l'upload : " + (err.message || "inconnue"));
-        } finally {
-          setFormAnimUploadPct(null);
-        }
-      }}
-    />
-  </UploadLabel>
-  {formAnimUploadPct !== null && <UploadProgressBar $pct={formAnimUploadPct} />}
-</Field>
+                <Label htmlFor="a-image">Image de l'animation</Label>
+                {formAnim.image && (
+                  <ImagePreviewWrap>
+                    <ImagePreviewImg src={formAnim.image} alt="Aperçu" />
+                  </ImagePreviewWrap>
+                )}
+                <UploadLabel htmlFor="a-image-upload" style={{ marginTop: formAnim.image ? "0.5rem" : 0 }}>
+                  🖼️ {formAnim.image ? "Changer l'image" : "Téléverser une image"}
+                  <HiddenFileInput
+                    id="a-image-upload"
+                    type="file"
+                    accept="image/*"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      setFormAnimUploadPct(0);
+                      try {
+                        const url = await uploadToCloudinary(file, setFormAnimUploadPct);
+                        setFormAnim(f => ({ ...f, image: url }));
+                      } catch (err: any) {
+                        alert("Erreur lors de l'upload : " + (err.message || "inconnue"));
+                      } finally {
+                        setFormAnimUploadPct(null);
+                      }
+                    }}
+                  />
+                </UploadLabel>
+                {formAnimUploadPct !== null && <UploadProgressBar $pct={formAnimUploadPct} />}
+              </Field>
 
               <Field>
                 <Label htmlFor="a-tags">Tags (séparés par des virgules)</Label>
@@ -2242,7 +2246,7 @@ async function uploadToCloudinary(
                 {submittingAnim ? "Création en cours…" : "Créer l'animation"}
               </SubmitBtn>
 
-              {messageAnim?.type === "ok"  && <SuccessMsg>{messageAnim.text}</SuccessMsg>}
+              {messageAnim?.type === "ok" && <SuccessMsg>{messageAnim.text}</SuccessMsg>}
               {messageAnim?.type === "err" && <ErrorMsg>{messageAnim.text}</ErrorMsg>}
             </form>
           </FormCard>
@@ -2253,7 +2257,18 @@ async function uploadToCloudinary(
           <div>
             <ListHeader>
               <ListTitle>Animations publiées</ListTitle>
-              <ListCount>{animations.length} occurrence{animations.length > 1 ? "s" : ""}</ListCount>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+                {animations.some(a => !a.lien) && (
+                  <DeleteBtn
+                    disabled={processingIds.has("liens")}
+                    onClick={genererLiensManquants}
+                    style={{ borderColor: "rgba(160,120,255,0.3)", background: "rgba(120,80,255,0.07)", color: "#c8a8ff" }}
+                  >
+                    {processingIds.has("liens") ? "…" : "🔗 Générer les liens manquants"}
+                  </DeleteBtn>
+                )}
+                <ListCount>{animations.length} occurrence{animations.length > 1 ? "s" : ""}</ListCount>
+              </div>
             </ListHeader>
 
             {loadingAnimations && <Loading>Chargement…</Loading>}
@@ -2287,7 +2302,7 @@ async function uploadToCloudinary(
                     key={premiere.recurrenceId || premiere.id}
                     style={{ flexDirection: "column", alignItems: "stretch", gap: "0.6rem" }}
                   >
-                    <div style={{ display: "flex", alignItems: "center", gap: "0.65rem" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.65rem", flexWrap: "wrap" }}>
                       <ItemInfo>
                         <ItemTitre>
                           {premiere.titre}
@@ -2302,16 +2317,29 @@ async function uploadToCloudinary(
                         </ItemMeta>
                       </ItemInfo>
                       <TypePill>🧙 {premiere.mjNom}</TypePill>
+                      <LinkBtn
+                        href={premiere.lien || lienAnimation(premiere.lieu, premiere.id)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        👁️ Voir
+                      </LinkBtn>
+                      <DeleteBtn
+                        onClick={() => copierLien(premiere)}
+                        style={{ borderColor: "rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.7)" }}
+                      >
+                        {lienCopie === premiere.id ? "✓ Copié" : "🔗 Copier le lien"}
+                      </DeleteBtn>
                       <DeleteBtn disabled={busy} onClick={() => dupliquerAnimation(premiere)}>
                         {busy ? "…" : "🔁 +7j"}
                       </DeleteBtn>
                       <DeleteBtn
-  disabled={busy}
-  onClick={() => ouvrirEditionGroupe(groupe)}
-  style={{ borderColor: "rgba(160,120,255,0.3)", background: "rgba(120,80,255,0.07)", color: "#c8a8ff" }}
->
-  ✏️ Modifier
-</DeleteBtn>
+                        disabled={busy}
+                        onClick={() => ouvrirEditionGroupe(groupe)}
+                        style={{ borderColor: "rgba(160,120,255,0.3)", background: "rgba(120,80,255,0.07)", color: "#c8a8ff" }}
+                      >
+                        ✏️ Modifier
+                      </DeleteBtn>
                       <DeleteBtn disabled={busy} onClick={() => annulerAnimation(groupe)}>
                         {busy ? "…" : "🗑️ Supprimer"}
                       </DeleteBtn>
@@ -2363,6 +2391,21 @@ async function uploadToCloudinary(
                             <MetaBadge>
                               📅 {a.date} · 🕒 {a.heure} · 👥 {a.inscrits}/{a.places}
                             </MetaBadge>
+                            <LinkBtn
+                              href={a.lien || lienAnimation(a.lieu, a.id)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              aria-label={`Voir la page du ${a.date}`}
+                            >
+                              👁️
+                            </LinkBtn>
+                            <DeleteBtn
+                              onClick={() => copierLien(a)}
+                              aria-label={`Copier le lien du ${a.date}`}
+                              style={{ borderColor: "rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.7)" }}
+                            >
+                              {lienCopie === a.id ? "✓" : "🔗"}
+                            </DeleteBtn>
                             <DeleteBtn
                               disabled={busyOcc}
                               onClick={() => {
@@ -2410,13 +2453,7 @@ async function uploadToCloudinary(
                   />
                 </Field>
 
-                <Field>
-                  <Label>Description</Label>
-                  <Input
-                    value={editGroupForm.description}
-                    onChange={e => setEditGroupForm(f => ({ ...f, description: e.target.value }))}
-                  />
-                </Field>
+                <ContenuAnimationFields value={contenuEdit} onChange={setContenuEdit} />
 
                 <FieldRow>
                   <Field>
@@ -2473,50 +2510,50 @@ async function uploadToCloudinary(
                 </Field>
 
                 {editGroupForm.lieuType === "presentiel" ? (
-  <Field>
-    <Label>Lieu *</Label>
-    <Select
-      value={editGroupForm.lieu}
-      onChange={e => setEditGroupForm(f => ({ ...f, lieu: e.target.value }))}
-    >
-      <option value="">— Choisir un lieu —</option>
-      {Object.entries(LIEUX).map(([slug, info]) => (
-        <option key={slug} value={slug}>{info.label}</option>
-      ))}
-      <option value="autre">📝 Autre lieu (à préciser)</option>
-    </Select>
-  </Field>
-) : (
-  <Field>
-    <Label>Outil / lien</Label>
-    <Input
-      placeholder="Ex : Discord, Roll20…"
-      value={editGroupForm.lieuDetail}
-      onChange={e => setEditGroupForm(f => ({ ...f, lieuDetail: e.target.value }))}
-    />
-  </Field>
-)}
+                  <Field>
+                    <Label>Lieu *</Label>
+                    <Select
+                      value={editGroupForm.lieu}
+                      onChange={e => setEditGroupForm(f => ({ ...f, lieu: e.target.value }))}
+                    >
+                      <option value="">— Choisir un lieu —</option>
+                      {Object.entries(LIEUX).map(([slug, info]) => (
+                        <option key={slug} value={slug}>{info.label}</option>
+                      ))}
+                      <option value="autre">📝 Autre lieu (à préciser)</option>
+                    </Select>
+                  </Field>
+                ) : (
+                  <Field>
+                    <Label>Outil / lien</Label>
+                    <Input
+                      placeholder="Ex : Discord, Roll20…"
+                      value={editGroupForm.lieuDetail}
+                      onChange={e => setEditGroupForm(f => ({ ...f, lieuDetail: e.target.value }))}
+                    />
+                  </Field>
+                )}
 
-{editGroupForm.lieuType === "presentiel" && editGroupForm.lieu === "autre" && (
-  <>
-    <Field>
-      <Label>Ville *</Label>
-      <Input
-        placeholder="Ex : Saint-Denis"
-        value={editGroupForm.lieuVilleLibre}
-        onChange={e => setEditGroupForm(f => ({ ...f, lieuVilleLibre: e.target.value }))}
-      />
-    </Field>
-    <Field>
-      <Label>Adresse / précisions</Label>
-      <Input
-        placeholder="Ex : 12 rue de la Paix"
-        value={editGroupForm.lieuAdresseLibre}
-        onChange={e => setEditGroupForm(f => ({ ...f, lieuAdresseLibre: e.target.value }))}
-      />
-    </Field>
-  </>
-)}
+                {editGroupForm.lieuType === "presentiel" && editGroupForm.lieu === "autre" && (
+                  <>
+                    <Field>
+                      <Label>Ville *</Label>
+                      <Input
+                        placeholder="Ex : Saint-Denis"
+                        value={editGroupForm.lieuVilleLibre}
+                        onChange={e => setEditGroupForm(f => ({ ...f, lieuVilleLibre: e.target.value }))}
+                      />
+                    </Field>
+                    <Field>
+                      <Label>Adresse / précisions</Label>
+                      <Input
+                        placeholder="Ex : 12 rue de la Paix"
+                        value={editGroupForm.lieuAdresseLibre}
+                        onChange={e => setEditGroupForm(f => ({ ...f, lieuAdresseLibre: e.target.value }))}
+                      />
+                    </Field>
+                  </>
+                )}
 
                 <Field>
                   <Label>MJ référent</Label>
@@ -2645,7 +2682,7 @@ async function uploadToCloudinary(
         </Grid>
       )}
 
-         {/* ── Onglet Tables (proposées par les MJ sur les animations) ── */}
+      {/* ── Onglet Tables (proposées par les MJ sur les animations) ── */}
       {onglet === "tables" && (
         <Grid>
           {loadingTables && <Loading>Chargement…</Loading>}
@@ -2680,7 +2717,7 @@ async function uploadToCloudinary(
                     {anim && <MetaBadge>📅 {anim.date}</MetaBadge>}
                     {t.heure && <MetaBadge>🕒 {t.heure}</MetaBadge>}
                     <MetaBadge>
-                      {statut === "pending"  && "⏳ En attente"}
+                      {statut === "pending" && "⏳ En attente"}
                       {statut === "approved" && "✅ Validée"}
                       {statut === "rejected" && "❌ Refusée"}
                     </MetaBadge>
@@ -2774,7 +2811,7 @@ async function uploadToCloudinary(
                 {submitting ? "Ajout en cours…" : "Ajouter la ressource"}
               </SubmitBtn>
 
-              {message?.type === "ok"  && <SuccessMsg>{message.text}</SuccessMsg>}
+              {message?.type === "ok" && <SuccessMsg>{message.text}</SuccessMsg>}
               {message?.type === "err" && <ErrorMsg>{message.text}</ErrorMsg>}
             </form>
           </FormCard>
