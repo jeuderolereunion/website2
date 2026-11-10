@@ -4,6 +4,7 @@ import styled from "styled-components";
 import { useEffect, useState } from "react";
 import { db, auth } from "@/lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
+import AdminCarousel from "@/app/admin/AdminCaroussel";
 import Navigation from "@/components/Navigation";
 import { uploadToCloudinary } from "@/lib/cloudinaryLoader";
 import ContenuAnimationFields, {
@@ -859,6 +860,7 @@ export default function AdminPage() {
     | "animations"
     | "tables"
     | "inscriptions-anim"
+    | "carrousel"
   >("comptes");
 
   const [membres, setMembres] = useState<Utilisateur[]>([]);
@@ -1882,6 +1884,9 @@ export default function AdminPage() {
           📚 Ressources
           {propositionsRessources.length > 0 && <Badge>{propositionsRessources.length}</Badge>}
         </Tab>
+          <Tab $active={onglet === "carrousel"} onClick={() => setOnglet("carrousel")}>
+          🎞️ Carrousel
+        </Tab>
       </Tabs>
 
       {/* ── Onglet Comptes en attente ── */}
@@ -2904,6 +2909,11 @@ export default function AdminPage() {
           </div>
 
         </RessourcesLayout>
+      )}
+      {onglet === "carrousel" && (
+        <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+          <AdminCarousel />
+        </div>
       )}
     </Page>
   );

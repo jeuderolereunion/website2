@@ -1,6 +1,5 @@
 "use client";
 
-import TableCard from "@/components/TableCard";
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import styled, { keyframes } from "styled-components";
@@ -407,8 +406,8 @@ const GeneralRegisterText = styled.p`
 `;
 
 const TableThumb = styled.img`
-  width: 46px;
-  height: 46px;
+  width: 56px;
+  height: 56px;
   border-radius: 8px;
   object-fit: cover;
   flex-shrink: 0;
@@ -435,12 +434,119 @@ const NoTablesMsg = styled.p`
   margin: 0 0 1.1rem;
 `;
 
-// Grille des cartes de tables (le design des cartes est dans TableCard)
+// ── Grille de tuiles carrées : une par table, avec son image ──────────────
+
 const TCGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 0.8rem;
   margin-bottom: 1.1rem;
+`;
+
+const TableSquare = styled.button<{ $image?: string }>`
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  aspect-ratio: 1 / 1;
+  border-radius: 14px;
+  overflow: hidden;
+  text-decoration: none;
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: ${p => p.$image
+    ? `url(${p.$image}) center/cover no-repeat`
+    : "linear-gradient(135deg, rgba(120,80,255,0.35), rgba(0,188,212,0.2))"};
+  transition: transform 150ms, border-color 150ms;
+  &:hover { transform: translateY(-2px); border-color: rgba(160,120,255,0.6); }
+  &:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+`;
+
+const SquareFallback = styled.span`
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2.6rem;
+  opacity: 0.55;
+`;
+
+const SquareTop = styled.div`
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  right: 0.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.3rem;
+`;
+
+const SquareBottom = styled.div`
+  position: absolute;
+  inset: auto 0 0 0;
+  padding: 1.8rem 0.7rem 0.65rem;
+  background: linear-gradient(180deg, transparent, rgba(13,13,20,0.92));
+`;
+
+const SquareSysteme = styled.div`
+  font-size: 0.85rem;
+  font-weight: 700;
+  line-height: 1.2;
+`;
+
+const SquareMj = styled.div`
+  font-size: 0.7rem;
+  color: rgba(255,255,255,0.65);
+  margin-top: 2px;
+`;
+
+// ── Fiche détail d'une table (dans la modale d'inscription) ───────────────
+
+const ModalImage = styled.img`
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 12px;
+  margin-bottom: 1rem;
+`;
+
+const DetailTags = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.9rem;
+`;
+
+const DetailTag = styled.span`
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  color: rgba(255,255,255,0.75);
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+`;
+
+const DetailDesc = styled.p`
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: rgba(255,255,255,0.7);
+  margin: 0 0 0.9rem;
+  white-space: pre-line;
+`;
+
+const ModalLink = styled(Link)`
+  font-size: 0.78rem;
+  color: rgba(160,120,255,0.9);
+  text-decoration: none;
+  &:hover { color: #c8a8ff; text-decoration: underline; }
 `;
 
 // ── Formulaire "Proposer ma table" (inline) ────────────────────────────────
@@ -698,6 +804,8 @@ const Modal = styled.div`
   padding: 2rem;
   width: 100%;
   max-width: 420px;
+  max-height: 90vh;
+  overflow-y: auto;
 `;
 
 const ModalTitle = styled.h2`
@@ -772,6 +880,23 @@ function getPlacesLevel(dispo: number): "ok" | "low" | "full" {
   if (dispo <= 2) return "low";
   return "ok";
 }
+
+// Cloudinary recadre en carré 400px côté serveur (évite de charger
+// une photo de 10 Mo dans une tuile de 150px)
+function squareThumb(url?: string): string | undefined {
+  if (!url) return undefined;
+  return url.includes("/upload/")
+    ? url.replace("/upload/", "/upload/c_fill,w_400,h_400,q_auto,f_auto/")
+    : url;
+}
+
+const DUREE_LABELS: Record<string, string> = {
+  "1-2h": "1h – 2h",
+  "2-3h": "2h – 3h",
+  "3-4h": "3h – 4h",
+  "4-6h": "4h – 6h",
+  "journee": "Journée complète",
+};
 
 const TABLE_FORM_VIDE = {
   systeme: "",
@@ -944,11 +1069,11 @@ export default function VenueEventsClient({
 
   function openRegisterModal(event: EventDoc, table: TableMJ | null) {
     if (authLoading) return;
-    if (!user) {
-      window.location.href = `/login?redirect=${encodeURIComponent(window.location.pathname)}`;
-      return;
-    }
     setSelected({ event, table });
+  }
+
+  function allerSeConnecter() {
+    window.location.href = `/login?redirect=${encodeURIComponent(window.location.pathname)}`;
   }
 
   function closeModal() {
@@ -1548,6 +1673,16 @@ export default function VenueEventsClient({
     image: undefined,
   };
 
+  // Table affichée dans la modale (version à jour après une inscription)
+  const tableModal: TableMJ | null = selected?.table
+    ? (tablesParEvent[selected.event.id] ?? []).find(t => t.id === selected.table!.id) ?? selected.table
+    : null;
+  const modalPlaces = tableModal
+    ? tableModal.placesMax - (tableModal.inscrits ?? 0)
+    : selected
+      ? selected.event.places - (selected.event.inscrits ?? 0)
+      : 0;
+
   const groupesParMois = events.reduce<{ mois: string; events: EventDoc[] }[]>((acc, e) => {
     const mois = formatMoisAnnee(e.date);
     const dernier = acc[acc.length - 1];
@@ -1675,13 +1810,33 @@ export default function VenueEventsClient({
                                 <NoTablesMsg>Aucune table proposée pour le moment.</NoTablesMsg>
                               ) : (
                                 <TCGrid>
-                                  {tablesApprouvees.map(t => (
-                                    <TableCard
-                                      key={t.id}
-                                      table={t}
-                                      href={`/evenements/${slug}/${lieu}/${e.id}/tables/${t.id}`}
-                                    />
-                                  ))}
+                                  {tablesApprouvees.map(t => {
+                                    const placesDispo = t.placesMax - (t.inscrits ?? 0);
+                                    return (
+                                      <TableSquare
+                                        key={t.id}
+                                        type="button"
+                                        onClick={(ev) => { ev.stopPropagation(); openRegisterModal(e, t); }}
+                                        $image={squareThumb(t.image)}
+                                        aria-label={`Table ${t.systeme} de ${t.mjNom}`}
+                                        title={t.description}
+                                      >
+                                        {!t.image && <SquareFallback>🎲</SquareFallback>}
+                                        <SquareTop>
+                                          <PlacesBadge $level={getPlacesLevel(placesDispo)}>
+                                            {placesDispo <= 0 ? "Complet" : `${placesDispo} place${placesDispo > 1 ? "s" : ""}`}
+                                          </PlacesBadge>
+                                          {t.ageTag && t.ageTag !== "tous" && (
+                                            <AgeTag $level={t.ageTag} style={{ marginLeft: 0 }}>{t.ageTag}+</AgeTag>
+                                          )}
+                                        </SquareTop>
+                                        <SquareBottom>
+                                          <SquareSysteme>{t.systeme}</SquareSysteme>
+                                          <SquareMj>🧙 {t.mjNom}</SquareMj>
+                                        </SquareBottom>
+                                      </TableSquare>
+                                    );
+                                  })}
                                 </TCGrid>
                               )}
 
@@ -1918,7 +2073,7 @@ export default function VenueEventsClient({
                                 tables.map(t => (
                                   <ReferentItem key={t.id}>
                                     <span style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                                      {t.image && <TableThumb src={t.image} alt="" />}
+                                      {t.image && <TableThumb src={squareThumb(t.image)} alt="" />}
                                       🧙 {t.mjNom}{t.systeme ? ` · ${t.systeme}` : ""} · {t.inscrits}/{t.placesMax} places
                                     </span>
                                     <StatusPill $tone={t.status === "approved" ? "ok" : t.status === "rejected" ? "danger" : "warn"}>
@@ -2020,18 +2175,59 @@ export default function VenueEventsClient({
           <Modal onClick={e => e.stopPropagation()}>
             {!success ? (
               <>
-                <ModalTitle>
-                  {selected.table ? "S'inscrire à cette table" : "S'inscrire à l'animation"}
-                </ModalTitle>
-                <ModalSub>
-                  {selected.table
-                    ? `${selected.table.mjNom}${selected.table.systeme ? ` · ${selected.table.systeme}` : ""}`
-                    : `${formatJourComplet(selected.event.date)} · ${selected.event.heure}`}
-                </ModalSub>
+                {tableModal ? (
+                  <>
+                    {tableModal.image && <ModalImage src={squareThumb(tableModal.image)} alt="" />}
+                    <ModalTitle>{tableModal.systeme}</ModalTitle>
+                    <ModalSub>
+                      🧙 {tableModal.mjNom} · {formatJourComplet(selected.event.date)} · {selected.event.heure}
+                    </ModalSub>
+                    <DetailTags>
+                      <PlacesBadge $level={getPlacesLevel(modalPlaces)}>
+                        {modalPlaces <= 0 ? "Complet" : `${modalPlaces} place${modalPlaces > 1 ? "s" : ""}`}
+                      </PlacesBadge>
+                      {tableModal.duree && (
+                        <DetailTag>⏱ {DUREE_LABELS[tableModal.duree] ?? tableModal.duree}</DetailTag>
+                      )}
+                      {tableModal.personnages && (
+                        <DetailTag>
+                          {tableModal.personnages === "pretires" ? "🧾 Prétirés fournis" : "✏️ Création à la table"}
+                        </DetailTag>
+                      )}
+                      {tableModal.ageTag && (
+                        <AgeTag $level={tableModal.ageTag} style={{ marginLeft: 0 }}>
+                          {tableModal.ageTag === "tous" ? "Tous publics" : `${tableModal.ageTag}+`}
+                        </AgeTag>
+                      )}
+                    </DetailTags>
+                    <DetailDesc>{tableModal.description}</DetailDesc>
+                    <ModalLink href={`/evenements/${slug}/${lieu}/${selected.event.id}/tables/${tableModal.id}`}>
+                      Voir la page complète de la table →
+                    </ModalLink>
+                  </>
+                ) : (
+                  <>
+                    <ModalTitle>S&apos;inscrire à l&apos;animation</ModalTitle>
+                    <ModalSub>
+                      {formatJourComplet(selected.event.date)} · {selected.event.heure}
+                    </ModalSub>
+                  </>
+                )}
                 <ModalActions>
-                  <CancelBtn onClick={closeModal}>Annuler</CancelBtn>
-                  <ConfirmBtn onClick={handleConfirmInscription} disabled={submitting}>
-                    {submitting ? "Envoi…" : "Confirmer"}
+                  <CancelBtn onClick={closeModal}>Fermer</CancelBtn>
+                  <ConfirmBtn
+                    onClick={() => (user ? handleConfirmInscription() : allerSeConnecter())}
+                    disabled={submitting || authLoading}
+                  >
+                    {submitting
+                      ? "Envoi…"
+                      : !user
+                        ? "Se connecter pour s'inscrire"
+                        : modalPlaces <= 0
+                          ? "📋 Rejoindre la liste d'attente"
+                          : tableModal
+                            ? "S'inscrire à cette table"
+                            : "S'inscrire"}
                   </ConfirmBtn>
                 </ModalActions>
               </>
