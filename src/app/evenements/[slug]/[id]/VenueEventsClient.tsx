@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import styled, { keyframes } from "styled-components";
 import { db, auth } from "@/lib/firebase";
@@ -12,6 +12,7 @@ import {
 import Navigation from "@/components/Navigation";
 import { uploadToCloudinary } from "@/lib/cloudinaryLoader";
 import { SYSTEMES } from "@/lib/systemes";
+
 
 type EventDoc = {
   id: string;
@@ -28,6 +29,7 @@ type EventDoc = {
   annule?: boolean; // animation annulée par le MJ référent ou un admin
   // ── Contenu affiché directement sur la carte (rempli depuis l'admin) ──────
   accroche?: string;
+  description?: string;
   programme?: { heure: string; titre: string }[];
   lien?: string;    // chemin de la page de l'animation (sinon recalculé)
 };
@@ -57,6 +59,8 @@ type TableMJ = {
   duree?: string;
   personnages?: "pretires" | "creation";
   ageTag?: "tous" | "16" | "18";
+  mjContact?: string;
+  mjContactPublic?: boolean;
 };
 
 type VenueInfo = { venue: string; ville: string; adresse: string; schedule: string; image?: string };
@@ -235,10 +239,11 @@ const EventCard = styled.div<{ $isNext?: boolean }>`
   transition: border-color 150ms;
 `;
 
-// position: relative → le lien « Voir les détails » s'étire sur toute cette zone
+// Zone haute de la carte : cliquable pour déplier / replier les tables
 const CardTop = styled.div`
   position: relative;
   padding: 1.25rem 1.4rem;
+  cursor: pointer;
 `;
 
 const NextTag = styled.div`
@@ -304,7 +309,7 @@ const PlacesBadge = styled.span<{ $level: "ok" | "low" | "full" }>`
                           "rgba(80,200,120,0.3)"};
 `;
 
-// ── Contenu de la carte : titre, accroche, début du programme, accès direct ──
+// ── Contenu de la carte : titre, accroche, description, programme ──
 
 const EventName = styled.h3`
   margin: 0.9rem 0 0;
@@ -318,6 +323,21 @@ const EventPitch = styled.p`
   font-size: 0.85rem;
   line-height: 1.55;
   color: rgba(255,255,255,0.65);
+`;
+
+const EventDesc = styled.p`
+  margin: 0.6rem 0 0;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: rgba(255,255,255,0.6);
+  white-space: pre-line;
+`;
+
+const DetailRow = styled.div`
+  font-size: 0.8rem;
+  color: rgba(255,255,255,0.55);
+  margin: 0 0 0.5rem;
+  line-height: 1.5;
 `;
 
 const EventSteps = styled.ul`
@@ -340,17 +360,18 @@ const EventActions = styled.div`
   margin-top: 1rem;
 `;
 
-const DetailBtn = styled(Link)`
+// Bouton d'inscription directe (plus un lien)
+const DetailBtn = styled.button`
   padding: 0.55rem 1rem;
   border-radius: 8px;
   font-size: 0.82rem;
   font-weight: 700;
   color: #fff;
-  text-decoration: none;
+  cursor: pointer;
   background: rgba(120,80,255,0.35);
   border: 1px solid rgba(160,120,255,0.6);
-  /* étire le lien sur toute la zone haute de la carte */
-  &::after { content: ""; position: absolute; inset: 0; }
+  position: relative;
+  z-index: 1;
   &:hover { background: rgba(120,80,255,0.5); }
   &:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 `;
@@ -443,10 +464,10 @@ const TCGrid = styled.div`
   margin-bottom: 1.1rem;
 `;
 
+// Tuile cliquable : ouvre la modale d'inscription à la table (plus de lien)
 const TableSquare = styled.button<{ $image?: string }>`
   position: relative;
   display: block;
-  width: 100%;
   padding: 0;
   font: inherit;
   text-align: left;
@@ -454,7 +475,6 @@ const TableSquare = styled.button<{ $image?: string }>`
   aspect-ratio: 1 / 1;
   border-radius: 14px;
   overflow: hidden;
-  text-decoration: none;
   color: #fff;
   border: 1px solid rgba(255,255,255,0.12);
   background: ${p => p.$image
@@ -503,50 +523,6 @@ const SquareMj = styled.div`
   font-size: 0.7rem;
   color: rgba(255,255,255,0.65);
   margin-top: 2px;
-`;
-
-// ── Fiche détail d'une table (dans la modale d'inscription) ───────────────
-
-const ModalImage = styled.img`
-  display: block;
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  object-fit: cover;
-  border-radius: 12px;
-  margin-bottom: 1rem;
-`;
-
-const DetailTags = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.4rem;
-  margin-bottom: 0.9rem;
-`;
-
-const DetailTag = styled.span`
-  font-size: 0.72rem;
-  font-weight: 600;
-  padding: 3px 10px;
-  border-radius: 999px;
-  color: rgba(255,255,255,0.75);
-  background: rgba(255,255,255,0.06);
-  border: 1px solid rgba(255,255,255,0.12);
-`;
-
-const DetailDesc = styled.p`
-  font-size: 0.85rem;
-  line-height: 1.6;
-  color: rgba(255,255,255,0.7);
-  margin: 0 0 0.9rem;
-  white-space: pre-line;
-`;
-
-const ModalLink = styled(Link)`
-  font-size: 0.78rem;
-  color: rgba(160,120,255,0.9);
-  text-decoration: none;
-  &:hover { color: #c8a8ff; text-decoration: underline; }
 `;
 
 // ── Formulaire "Proposer ma table" (inline) ────────────────────────────────
@@ -790,7 +766,7 @@ const Overlay = styled.div`
   inset: 0;
   background: rgba(0,0,0,0.7);
   backdrop-filter: blur(4px);
-  z-index: 200;
+  z-index: 300;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -861,6 +837,294 @@ const SuccessMsg = styled.div`
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// ── Fiche détaillée (animation ou table) ──────────────────────────────────
+
+const DetailOverlay = styled.div`
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.78);
+  backdrop-filter: blur(4px);
+  z-index: 250;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 1.5rem 1rem;
+  overflow-y: auto;
+  @media (max-width: 640px) { padding: 0; }
+`;
+
+const DetailBox = styled.div`
+  position: relative;
+  width: 100%;
+  max-width: 680px;
+  margin: auto 0;
+  background: #14141f;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 18px;
+  overflow: hidden;
+  animation: ${fadeUp} 0.25s ease both;
+  @media (max-width: 640px) { border-radius: 0; min-height: 100vh; margin: 0; }
+`;
+
+const DetailHero = styled.div<{ $bg?: string }>`
+  position: relative;
+  min-height: 210px;
+  padding: 4.5rem 1.5rem 1.4rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  background:
+    linear-gradient(180deg, rgba(20,20,31,0.15) 0%, rgba(20,20,31,0.96) 100%),
+    ${p => p.$bg ? `url(${p.$bg}) center/cover` : "linear-gradient(135deg, rgba(120,80,255,0.4), rgba(0,188,212,0.18))"};
+`;
+
+const DetailClose = styled.button`
+  position: absolute;
+  top: 0.9rem;
+  right: 0.9rem;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0,0,0,0.55);
+  color: #fff;
+  font-size: 1rem;
+  cursor: pointer;
+  z-index: 3;
+  &:hover { background: rgba(0,0,0,0.8); }
+`;
+
+const DetailBackBtn = styled.button`
+  position: absolute;
+  top: 1rem;
+  left: 1.1rem;
+  background: rgba(0,0,0,0.45);
+  border: none;
+  border-radius: 999px;
+  padding: 0.4rem 0.85rem;
+  font-size: 0.78rem;
+  color: rgba(255,255,255,0.85);
+  cursor: pointer;
+  z-index: 3;
+  &:hover { background: rgba(0,0,0,0.7); }
+`;
+
+const DetailKind = styled.span`
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: fit-content;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: rgba(120,80,255,0.25);
+  border: 1px solid rgba(160,120,255,0.35);
+  color: #c8a8ff;
+  margin-bottom: 0.7rem;
+`;
+
+const DetailTitle = styled.h2`
+  margin: 0 0 0.6rem;
+  font-size: clamp(1.4rem, 4vw, 1.9rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+`;
+
+const DetailTagRow = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+`;
+
+const DetailTag = styled.span`
+  font-size: 0.74rem;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.08);
+  border: 0.5px solid rgba(255,255,255,0.15);
+  color: rgba(255,255,255,0.7);
+`;
+
+const DetailBody = styled.div`
+  padding: 1.4rem 1.5rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.6rem;
+`;
+
+const DetailSectionLabel = styled.p`
+  margin: 0 0 0.7rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(160,120,255,0.8);
+`;
+
+const DetailText = styled.p`
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.7;
+  color: rgba(255,255,255,0.68);
+  white-space: pre-line;
+`;
+
+const InfoGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.6rem;
+  @media (max-width: 420px) { grid-template-columns: 1fr; }
+`;
+
+const InfoItem = styled.div`
+  padding: 0.7rem 0.85rem;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+`;
+
+const InfoLabel = styled.div`
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.35);
+  margin-bottom: 3px;
+`;
+
+const InfoValue = styled.div`
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: rgba(255,255,255,0.88);
+`;
+
+const StepList = styled.ul`
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+`;
+
+const StepItem = styled.li`
+  display: flex;
+  gap: 0.8rem;
+  align-items: baseline;
+  font-size: 0.88rem;
+  color: rgba(255,255,255,0.7);
+  line-height: 1.5;
+`;
+
+const StepTime = styled.span`
+  flex-shrink: 0;
+  min-width: 52px;
+  font-weight: 700;
+  color: #c8a8ff;
+  font-size: 0.82rem;
+`;
+
+const MJCardBox = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.9rem 1rem;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.09);
+`;
+
+const MJAvatarCircle = styled.div`
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: rgba(120,80,255,0.3);
+  color: #c8a8ff;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+`;
+
+const MJCardName = styled.div`
+  font-size: 0.92rem;
+  font-weight: 700;
+`;
+
+const MJCardSub = styled.div`
+  font-size: 0.76rem;
+  color: rgba(255,255,255,0.45);
+  margin-top: 2px;
+`;
+
+const MapWrap = styled.div`
+  border-radius: 12px;
+  overflow: hidden;
+  border: 0.5px solid rgba(255,255,255,0.1);
+  iframe { width: 100%; height: 200px; border: none; display: block; }
+`;
+
+const MapCaption = styled.div`
+  padding: 0.7rem 1rem;
+  background: rgba(255,255,255,0.04);
+  font-size: 0.82rem;
+  color: rgba(255,255,255,0.6);
+`;
+
+const DetailFooter = styled.div`
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.9rem 1.5rem;
+  background: rgba(20,20,31,0.96);
+  backdrop-filter: blur(8px);
+  border-top: 1px solid rgba(255,255,255,0.09);
+`;
+
+const FooterNote = styled.p`
+  flex: 1;
+  margin: 0;
+  font-size: 0.82rem;
+  color: rgba(255,255,255,0.6);
+  line-height: 1.4;
+`;
+
+const BigRegBtn = styled.button<{ $full?: boolean }>`
+  flex: 1;
+  padding: 0.8rem 1rem;
+  border-radius: 10px;
+  font-size: 0.92rem;
+  font-weight: 700;
+  cursor: pointer;
+  color: ${p => p.$full ? "#ffcf7d" : "#fff"};
+  background: ${p => p.$full ? "rgba(255,180,60,0.15)" : "rgba(120,80,255,0.55)"};
+  border: 1px solid ${p => p.$full ? "rgba(255,180,60,0.4)" : "rgba(160,120,255,0.7)"};
+  transition: background 150ms;
+  &:hover { background: ${p => p.$full ? "rgba(255,180,60,0.25)" : "rgba(120,80,255,0.75)"}; }
+`;
+
+const FooterDangerBtn = styled.button`
+  padding: 0.7rem 1rem;
+  border-radius: 10px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  color: #ff8080;
+  background: rgba(255,80,80,0.12);
+  border: 1px solid rgba(255,80,80,0.35);
+  &:hover { background: rgba(255,80,80,0.2); }
+`;
+
+const TablesStrip = styled.div`
+  padding: 0 1.4rem 1.25rem;
+`;
+
 const JOURS = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"];
 const MOIS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
 
@@ -889,14 +1153,6 @@ function squareThumb(url?: string): string | undefined {
     ? url.replace("/upload/", "/upload/c_fill,w_400,h_400,q_auto,f_auto/")
     : url;
 }
-
-const DUREE_LABELS: Record<string, string> = {
-  "1-2h": "1h – 2h",
-  "2-3h": "2h – 3h",
-  "3-4h": "3h – 4h",
-  "4-6h": "4h – 6h",
-  "journee": "Journée complète",
-};
 
 const TABLE_FORM_VIDE = {
   systeme: "",
@@ -968,6 +1224,20 @@ export default function VenueEventsClient({
 
   const estMJ = userProfile?.role === "mj" || userProfile?.role === "admin";
 
+  // Fiche détaillée : animation (tableId = null) ou table précise
+  const [detail, setDetail] = useState<{ eventId: string; tableId: string | null } | null>(null);
+  const detailRef = useRef<HTMLDivElement>(null);
+
+  // Ajout d'une table pour le compte d'un autre MJ (organisateur / admin)
+  // clé = eventId ; null = formulaire "ma propre table"
+  const [pourAutreMj, setPourAutreMj] = useState<Record<string, { mjId: string; nomLibre: string } | null>>({});
+  const [mjsDisponibles, setMjsDisponibles] = useState<{ id: string; nom: string }[]>([]);
+  const [loadingMjs, setLoadingMjs] = useState(false);
+
+  useEffect(() => {
+    detailRef.current?.scrollTo({ top: 0 });
+  }, [detail?.eventId, detail?.tableId]);
+
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
       setUser(firebaseUser);
@@ -1012,13 +1282,33 @@ export default function VenueEventsClient({
     return () => { cancelled = true; };
   }, [lieu, slug]);
 
+  // Précharge les tables de chaque animation pour les afficher directement
+  // sur la carte (sans avoir à la déplier).
+  useEffect(() => {
+    let cancelled = false;
+    events.forEach(ev => {
+      if (tablesParEvent[ev.id]) return;
+      getDocs(collection(db, "evenements", ev.id, "tables")).then(snap => {
+        if (cancelled) return;
+        const tables = snap.docs.map(d => ({ id: d.id, inscrits: 0, ...d.data() })) as TableMJ[];
+        setTablesParEvent(prev => (prev[ev.id] ? prev : { ...prev, [ev.id]: tables }));
+      }).catch(() => {});
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [events]);
+
   async function toggleExpand(eventId: string) {
     if (expandedId === eventId) {
       setExpandedId(null);
       return;
     }
     setExpandedId(eventId);
+    await chargerDonnees(eventId);
+  }
 
+  // Charge tables, inscription du joueur et (si référent) la liste des inscrits
+  async function chargerDonnees(eventId: string) {
     if (!tablesParEvent[eventId]) {
       setLoadingTables(prev => ({ ...prev, [eventId]: true }));
       try {
@@ -1067,13 +1357,18 @@ export default function VenueEventsClient({
     }
   }
 
-  function openRegisterModal(event: EventDoc, table: TableMJ | null) {
-    if (authLoading) return;
-    setSelected({ event, table });
+  function openDetail(eventId: string, tableId: string | null) {
+    setDetail({ eventId, tableId });
+    chargerDonnees(eventId);
   }
 
-  function allerSeConnecter() {
-    window.location.href = `/login?redirect=${encodeURIComponent(window.location.pathname)}`;
+  function openRegisterModal(event: EventDoc, table: TableMJ | null) {
+    if (authLoading) return;
+    if (!user) {
+      window.location.href = `/login?redirect=${encodeURIComponent(window.location.pathname)}`;
+      return;
+    }
+    setSelected({ event, table });
   }
 
   function closeModal() {
@@ -1377,7 +1672,40 @@ export default function VenueEventsClient({
 
   // ── Proposer une table (formulaire inline MJ) ─────────────────────────────
 
+  async function chargerMjs() {
+    if (mjsDisponibles.length > 0 || loadingMjs) return;
+    setLoadingMjs(true);
+    try {
+      const snap = await getDocs(
+        query(collection(db, "users"), where("role", "in", ["mj", "admin"]))
+      );
+      const list = snap.docs
+        .map(d => {
+          const x = d.data() as any;
+          const nom = x.pseudo || `${x.prenom || ""} ${x.nom || ""}`.trim() || x.email || "MJ";
+          return { id: d.id, nom };
+        })
+        .sort((a, b) => a.nom.localeCompare(b.nom));
+      setMjsDisponibles(list);
+    } catch {
+      // Règles Firestore ou réseau : on laissera la saisie libre du nom
+    } finally {
+      setLoadingMjs(false);
+    }
+  }
+
+  function ouvrirFormulaireTablePourAutre(eventId: string) {
+    setTableForm(prev => ({ ...prev, [eventId]: { ...TABLE_FORM_VIDE } }));
+    setEditingTableId(prev => ({ ...prev, [eventId]: null }));
+    setTableImageFile(prev => ({ ...prev, [eventId]: null }));
+    setTableImagePreview(prev => ({ ...prev, [eventId]: null }));
+    setPourAutreMj(prev => ({ ...prev, [eventId]: { mjId: "", nomLibre: "" } }));
+    setTableFormOpen(prev => ({ ...prev, [eventId]: true }));
+    chargerMjs();
+  }
+
   function ouvrirFormulaireTable(eventId: string) {
+    setPourAutreMj(prev => ({ ...prev, [eventId]: null }));
     setTableForm(prev => ({ ...prev, [eventId]: { ...TABLE_FORM_VIDE } }));
     setEditingTableId(prev => ({ ...prev, [eventId]: null }));
     setTableImageFile(prev => ({ ...prev, [eventId]: null }));
@@ -1400,12 +1728,14 @@ export default function VenueEventsClient({
       },
     }));
     setEditingTableId(prev => ({ ...prev, [eventId]: table.id }));
+    setPourAutreMj(prev => ({ ...prev, [eventId]: null }));
     setTableImageFile(prev => ({ ...prev, [eventId]: null }));
     setTableImagePreview(prev => ({ ...prev, [eventId]: table.image || null }));
     setTableFormOpen(prev => ({ ...prev, [eventId]: true }));
   }
 
   function fermerFormulaireTable(eventId: string) {
+    setPourAutreMj(prev => ({ ...prev, [eventId]: null }));
     setTableFormOpen(prev => ({ ...prev, [eventId]: false }));
     setEditingTableId(prev => ({ ...prev, [eventId]: null }));
     setTableImageFile(prev => ({ ...prev, [eventId]: null }));
@@ -1439,6 +1769,33 @@ export default function VenueEventsClient({
       return;
     }
 
+    // Table ajoutée par l'organisateur / admin pour un autre MJ
+    const autre = pourAutreMj[eventId] ?? null;
+    let mjIdFinal = user.uid;
+    let mjNomFinal = userProfile.pseudo || userProfile.email;
+    if (autre) {
+      if (autre.mjId === "__autre__") {
+        if (!autre.nomLibre.trim()) {
+          alert("Merci de saisir le nom du MJ.");
+          return;
+        }
+        mjIdFinal = "";
+        mjNomFinal = autre.nomLibre.trim();
+      } else {
+        const mjChoisi = mjsDisponibles.find(m => m.id === autre.mjId);
+        if (!mjChoisi) {
+          alert("Merci de choisir le MJ de cette table.");
+          return;
+        }
+        if ((tablesParEvent[eventId] ?? []).some(t => t.mjId === mjChoisi.id)) {
+          alert(`${mjChoisi.nom} a déjà une table sur cette animation.`);
+          return;
+        }
+        mjIdFinal = mjChoisi.id;
+        mjNomFinal = mjChoisi.nom;
+      }
+    }
+
     setSubmittingTable(prev => ({ ...prev, [eventId]: true }));
     try {
       let imageUrl = "";
@@ -1453,13 +1810,15 @@ export default function VenueEventsClient({
       }
 
       const nouvelleTable = {
-        mjId: user.uid,
-        mjNom: userProfile.pseudo || userProfile.email,
+        mjId: mjIdFinal,
+        mjNom: mjNomFinal,
         systeme: systemeLabel,
         description: form.description,
         placesMax: Number(form.placesMax) || 1,
         inscrits: 0,
-        status: "pending" as const,
+        // Ajoutée par l'organisateur / admin : validée d'office
+        status: (autre ? "approved" : "pending") as "pending" | "approved",
+        ...(autre ? { ajoutePar: user.uid } : {}),
         image: imageUrl,
         duree: form.duree,
         personnages: form.personnages,
@@ -1474,6 +1833,7 @@ export default function VenueEventsClient({
         [eventId]: [...(prev[eventId] ?? []), { id: docRef.id, ...nouvelleTable }],
       }));
 
+      setPourAutreMj(prev => ({ ...prev, [eventId]: null }));
       setTableFormOpen(prev => ({ ...prev, [eventId]: false }));
       setTableForm(prev => ({ ...prev, [eventId]: { ...TABLE_FORM_VIDE } }));
       setTableImageFile(prev => ({ ...prev, [eventId]: null }));
@@ -1673,16 +2033,6 @@ export default function VenueEventsClient({
     image: undefined,
   };
 
-  // Table affichée dans la modale (version à jour après une inscription)
-  const tableModal: TableMJ | null = selected?.table
-    ? (tablesParEvent[selected.event.id] ?? []).find(t => t.id === selected.table!.id) ?? selected.table
-    : null;
-  const modalPlaces = tableModal
-    ? tableModal.placesMax - (tableModal.inscrits ?? 0)
-    : selected
-      ? selected.event.places - (selected.event.inscrits ?? 0)
-      : 0;
-
   const groupesParMois = events.reduce<{ mois: string; events: EventDoc[] }[]>((acc, e) => {
     const mois = formatMoisAnnee(e.date);
     const dernier = acc[acc.length - 1];
@@ -1731,6 +2081,8 @@ export default function VenueEventsClient({
                   const isExpanded = expandedId === e.id;
                   const tables = tablesParEvent[e.id] ?? [];
                   const tablesApprouvees = tables.filter(t => t.status === "approved");
+                  // L'organisateur / admin voit TOUTES les tables (y compris en attente / refusées)
+                  const tablesAffichees = estReferent ? tables : tablesApprouvees;
                   const monInscription = mesInscriptions[e.id];
                   const myTable = user ? tables.find(t => t.mjId === user.uid) ?? null : null;
                   const formOuvert = tableFormOpen[e.id] ?? false;
@@ -1739,7 +2091,7 @@ export default function VenueEventsClient({
 
                   return (
                     <EventCard key={e.id} $isNext={estProchaine}>
-                      <CardTop>
+                      <CardTop onClick={() => openDetail(e.id, null)}>
                         {estProchaine && <NextTag>⭐ Prochaine séance</NextTag>}
                         <EventTopRow>
                           <EventInfo>
@@ -1758,23 +2110,90 @@ export default function VenueEventsClient({
 
                         <EventName>{e.titre}</EventName>
                         {e.accroche && <EventPitch>{e.accroche}</EventPitch>}
+                        {e.description && <EventDesc>{e.description}</EventDesc>}
+
                         {e.programme && e.programme.length > 0 && (
                           <EventSteps>
-                            {e.programme.slice(0, 3).map((p, i) => (
+                            {e.programme.map((p, i) => (
                               <li key={i}>{p.heure} · {p.titre}</li>
                             ))}
                           </EventSteps>
                         )}
 
                         <EventActions>
-                          <DetailBtn href={e.lien || `/evenements/${slug}/${lieu}/${e.id}`}>
+                          <DetailBtn
+                            onClick={(ev) => { ev.stopPropagation(); openDetail(e.id, null); }}
+                          >
                             {level === "full" ? "Voir les détails, liste d'attente →" : "Voir les détails et s'inscrire →"}
                           </DetailBtn>
-                          <ToggleBtn onClick={() => toggleExpand(e.id)} aria-expanded={isExpanded}>
-                            {isExpanded ? "▲ Réduire" : "▼ Voir les tables"}
+                          <ToggleBtn
+                            onClick={(ev) => { ev.stopPropagation(); toggleExpand(e.id); }}
+                            aria-expanded={isExpanded}
+                          >
+                            {isExpanded ? "▲ Réduire" : "▼ Autres options"}
                           </ToggleBtn>
                         </EventActions>
                       </CardTop>
+
+                      {(tablesAffichees.length > 0 || estReferent) && (
+                        <TablesStrip>
+                          <SubLabel>
+                            {estReferent
+                              ? `Toutes les tables (${tables.length}) · cliquez pour voir le détail`
+                              : "Tables proposées · cliquez pour voir le détail et vous inscrire"}
+                          </SubLabel>
+                          {tablesAffichees.length === 0 && (
+                            <NoTablesMsg style={{ marginBottom: "0.6rem" }}>Aucune table pour le moment.</NoTablesMsg>
+                          )}
+                          <TCGrid style={{ marginBottom: 0 }}>
+                            {tablesAffichees.map(t => {
+                              const placesT = t.placesMax - (t.inscrits ?? 0);
+                              return (
+                                <TableSquare
+                                  key={t.id}
+                                  type="button"
+                                  onClick={() => openDetail(e.id, t.id)}
+                                  $image={squareThumb(t.image)}
+                                  aria-label={`Voir la table ${t.systeme} de ${t.mjNom}`}
+                                  title={t.description}
+                                >
+                                  {!t.image && <SquareFallback>🎲</SquareFallback>}
+                                  <SquareTop>
+                                    <PlacesBadge $level={getPlacesLevel(placesT)}>
+                                      {placesT <= 0 ? "Complet" : `${placesT} place${placesT > 1 ? "s" : ""}`}
+                                    </PlacesBadge>
+                                    {t.ageTag && t.ageTag !== "tous" && (
+                                      <AgeTag $level={t.ageTag} style={{ marginLeft: 0 }}>{t.ageTag}+</AgeTag>
+                                    )}
+                                  </SquareTop>
+                                  <SquareBottom>
+                                    <SquareSysteme>{t.systeme}</SquareSysteme>
+                                    <SquareMj>🧙 {t.mjNom}</SquareMj>
+                                    {t.status !== "approved" && (
+                                      <StatusPill $tone={t.status === "rejected" ? "danger" : "warn"} style={{ display: "inline-block", marginTop: 4 }}>
+                                        {t.status === "rejected" ? "Refusée" : "En attente"}
+                                      </StatusPill>
+                                    )}
+                                  </SquareBottom>
+                                </TableSquare>
+                              );
+                            })}
+                          </TCGrid>
+
+                          {estReferent && (
+                            <ProposeTableBtn
+                              style={{ marginTop: "0.8rem" }}
+                              onClick={() => {
+                                setExpandedId(e.id);
+                                chargerDonnees(e.id);
+                                ouvrirFormulaireTablePourAutre(e.id);
+                              }}
+                            >
+                              ➕ Ajouter une table pour un autre MJ
+                            </ProposeTableBtn>
+                          )}
+                        </TablesStrip>
+                      )}
 
                       {isExpanded && (
                         <ExpandedZone>
@@ -1802,44 +2221,6 @@ export default function VenueEventsClient({
                             </GeneralRegisterBox>
                           ) : (
                             <>
-                              <SubLabel>Tables proposées par les MJ</SubLabel>
-
-                              {loadingTables[e.id] ? (
-                                <NoTablesMsg>Chargement des tables…</NoTablesMsg>
-                              ) : tablesApprouvees.length === 0 ? (
-                                <NoTablesMsg>Aucune table proposée pour le moment.</NoTablesMsg>
-                              ) : (
-                                <TCGrid>
-                                  {tablesApprouvees.map(t => {
-                                    const placesDispo = t.placesMax - (t.inscrits ?? 0);
-                                    return (
-                                      <TableSquare
-                                        key={t.id}
-                                        type="button"
-                                        onClick={(ev) => { ev.stopPropagation(); openRegisterModal(e, t); }}
-                                        $image={squareThumb(t.image)}
-                                        aria-label={`Table ${t.systeme} de ${t.mjNom}`}
-                                        title={t.description}
-                                      >
-                                        {!t.image && <SquareFallback>🎲</SquareFallback>}
-                                        <SquareTop>
-                                          <PlacesBadge $level={getPlacesLevel(placesDispo)}>
-                                            {placesDispo <= 0 ? "Complet" : `${placesDispo} place${placesDispo > 1 ? "s" : ""}`}
-                                          </PlacesBadge>
-                                          {t.ageTag && t.ageTag !== "tous" && (
-                                            <AgeTag $level={t.ageTag} style={{ marginLeft: 0 }}>{t.ageTag}+</AgeTag>
-                                          )}
-                                        </SquareTop>
-                                        <SquareBottom>
-                                          <SquareSysteme>{t.systeme}</SquareSysteme>
-                                          <SquareMj>🧙 {t.mjNom}</SquareMj>
-                                        </SquareBottom>
-                                      </TableSquare>
-                                    );
-                                  })}
-                                </TCGrid>
-                              )}
-
                               <GeneralRegisterBox>
                                 <GeneralRegisterText>
                                   Pas de préférence de table ? Inscrivez-vous directement à l&apos;animation.
@@ -1852,10 +2233,43 @@ export default function VenueEventsClient({
                           )}
 
                           {/* ── Bloc MJ : proposer / modifier sa table, inline ── */}
-                          {estMJ && (
+                          {(estMJ || estReferent) && (
                             <MjSection>
                               {formOuvert ? (
                                 <TableFormBox onClick={(ev) => ev.stopPropagation()}>
+                                  {pourAutreMj[e.id] && (
+                                    <div>
+                                      <FieldLabel>MJ de cette table</FieldLabel>
+                                      <Select
+                                        value={pourAutreMj[e.id]!.mjId}
+                                        onChange={ev => setPourAutreMj(prev => ({
+                                          ...prev,
+                                          [e.id]: { mjId: ev.target.value, nomLibre: prev[e.id]?.nomLibre ?? "" },
+                                        }))}
+                                      >
+                                        <option value="">{loadingMjs ? "Chargement des MJ…" : "— Choisir un MJ —"}</option>
+                                        {mjsDisponibles.map(m => (
+                                          <option key={m.id} value={m.id}>{m.nom}</option>
+                                        ))}
+                                        <option value="__autre__">Autre (saisir un nom)</option>
+                                      </Select>
+                                      {pourAutreMj[e.id]!.mjId === "__autre__" && (
+                                        <Input
+                                          style={{ marginTop: "0.5rem" }}
+                                          value={pourAutreMj[e.id]!.nomLibre}
+                                          onChange={ev => setPourAutreMj(prev => ({
+                                            ...prev,
+                                            [e.id]: { mjId: "__autre__", nomLibre: ev.target.value },
+                                          }))}
+                                          placeholder="Nom du MJ"
+                                        />
+                                      )}
+                                      <NoTablesMsg style={{ margin: "0.4rem 0 0" }}>
+                                        La table sera validée directement et le MJ choisi pourra la retrouver et la modifier.
+                                      </NoTablesMsg>
+                                    </div>
+                                  )}
+
                                   <div>
                                     <FieldLabel>Système / jeu</FieldLabel>
                                     <Select
@@ -2000,13 +2414,14 @@ export default function VenueEventsClient({
                                         busyTable ||
                                         !formValues.description ||
                                         !formValues.systeme ||
-                                        (formValues.systeme === "Autre" && !formValues.systemeAutre)
+                                        (formValues.systeme === "Autre" && !formValues.systemeAutre) ||
+                                        (!!pourAutreMj[e.id] && !pourAutreMj[e.id]!.mjId)
                                       }
                                       onClick={() => (editingTableId[e.id] ? modifierTable(e.id) : proposerTable(e.id))}
                                     >
                                       {busyTable
                                         ? (uploadingTableImage[e.id] ? "Envoi de l'image…" : "Envoi…")
-                                        : (editingTableId[e.id] ? "Enregistrer les modifications" : "Proposer la table")}
+                                        : (editingTableId[e.id] ? "Enregistrer les modifications" : pourAutreMj[e.id] ? "Ajouter la table" : "Proposer la table")}
                                     </SubmitTableBtn>
                                   </FormActionsRow>
                                 </TableFormBox>
@@ -2076,9 +2491,18 @@ export default function VenueEventsClient({
                                       {t.image && <TableThumb src={squareThumb(t.image)} alt="" />}
                                       🧙 {t.mjNom}{t.systeme ? ` · ${t.systeme}` : ""} · {t.inscrits}/{t.placesMax} places
                                     </span>
-                                    <StatusPill $tone={t.status === "approved" ? "ok" : t.status === "rejected" ? "danger" : "warn"}>
-                                      {t.status === "approved" ? "Validée" : t.status === "rejected" ? "Refusée" : "En attente"}
-                                    </StatusPill>
+                                    <span style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                                      <StatusPill $tone={t.status === "approved" ? "ok" : t.status === "rejected" ? "danger" : "warn"}>
+                                        {t.status === "approved" ? "Validée" : t.status === "rejected" ? "Refusée" : "En attente"}
+                                      </StatusPill>
+                                      <SmallBtn
+                                        style={{ padding: "0.3rem 0.6rem" }}
+                                        onClick={(ev) => { ev.stopPropagation(); ouvrirFormulaireEdition(e.id, t); }}
+                                        title="Modifier cette table"
+                                      >
+                                        ✏️
+                                      </SmallBtn>
+                                    </span>
                                   </ReferentItem>
                                 ))
                               )}
@@ -2169,65 +2593,292 @@ export default function VenueEventsClient({
         )}
       </Container>
 
+      {/* ── Fiche détaillée (animation ou table) ── */}
+      {detail && (() => {
+        const ev = events.find(x => x.id === detail.eventId);
+        if (!ev) return null;
+        const tablesEv = tablesParEvent[ev.id] ?? [];
+        const approuvees = tablesEv.filter(t => t.status === "approved");
+        const refer = !!user && (ev.mjId === user.uid || userProfile?.role === "admin");
+        const affichees = refer ? tablesEv : approuvees;
+        const tbl = detail.tableId ? tablesEv.find(t => t.id === detail.tableId) ?? null : null;
+        const monIns = mesInscriptions[ev.id];
+        const dispoEv = ev.places - (ev.inscrits ?? 0);
+        const dispoTbl = tbl ? tbl.placesMax - (tbl.inscrits ?? 0) : 0;
+        const dispoAff = tbl ? dispoTbl : dispoEv;
+        const complet = dispoAff <= 0;
+        const estMaTable = !!tbl && !!user && tbl.mjId === user.uid;
+        const contactPublic = !!tbl && !!tbl.mjContactPublic && !!tbl.mjContact;
+        const lieuTxt = venueAffichee.adresse && venueAffichee.adresse !== "Adresse à préciser" ? venueAffichee.adresse : "";
+        const mapsSrc = lieuTxt ? `https://maps.google.com/maps?q=${encodeURIComponent(lieuTxt)}&output=embed` : "";
+        const initiales = (nom: string) =>
+          nom.split(" ").map(w => w[0]).filter(Boolean).slice(0, 2).join("").toUpperCase() || "MJ";
+        const heroImg = tbl ? tbl.image : venueAffichee.image;
+        const tableInscrite = monIns?.tableId ? tablesEv.find(t => t.id === monIns.tableId) ?? null : null;
+        const inscritIci = !!monIns && (!tbl || monIns.tableId === tbl.id);
+        const dureeLabel = (d?: string) => d === "journee" ? "Journée complète" : (d ?? "");
+
+        return (
+          <DetailOverlay ref={detailRef} onClick={() => setDetail(null)}>
+            <DetailBox onClick={e => e.stopPropagation()}>
+              {tbl && (
+                <DetailBackBtn onClick={() => setDetail({ eventId: ev.id, tableId: null })}>
+                  ← L&apos;animation
+                </DetailBackBtn>
+              )}
+              <DetailClose onClick={() => setDetail(null)} aria-label="Fermer">✕</DetailClose>
+
+              <DetailHero $bg={heroImg}>
+                <DetailKind>{tbl ? "🧙 Table de jeu" : "🎲 Animation"}</DetailKind>
+                <DetailTitle>
+                  {tbl ? `${tbl.systeme}` : ev.titre}
+                </DetailTitle>
+                <DetailTagRow>
+                  {tbl ? (
+                    <>
+                      <DetailTag>🧙 {tbl.mjNom}</DetailTag>
+                      {tbl.ageTag && tbl.ageTag !== "tous" && <DetailTag>{tbl.ageTag}+</DetailTag>}
+                      {tbl.duree && <DetailTag>⏱ {dureeLabel(tbl.duree)}</DetailTag>}
+                    </>
+                  ) : (
+                    <>
+                      <DetailTag>📅 {formatJourComplet(ev.date)}</DetailTag>
+                      <DetailTag>🕒 {ev.heure}{ev.duree ? ` · ${ev.duree}` : ""}</DetailTag>
+                    </>
+                  )}
+                </DetailTagRow>
+              </DetailHero>
+
+              <DetailBody>
+                {/* Infos pratiques */}
+                <div>
+                  <DetailSectionLabel>Infos pratiques</DetailSectionLabel>
+                  <InfoGrid>
+                    <InfoItem>
+                      <InfoLabel>Date</InfoLabel>
+                      <InfoValue>{formatJourComplet(ev.date)}</InfoValue>
+                    </InfoItem>
+                    <InfoItem>
+                      <InfoLabel>Horaire</InfoLabel>
+                      <InfoValue>{ev.heure}{!tbl && ev.duree ? ` · ${ev.duree}` : ""}</InfoValue>
+                    </InfoItem>
+                    {tbl ? (
+                      <>
+                        <InfoItem>
+                          <InfoLabel>Durée estimée</InfoLabel>
+                          <InfoValue>{tbl.duree ? dureeLabel(tbl.duree) : "—"}</InfoValue>
+                        </InfoItem>
+                        <InfoItem>
+                          <InfoLabel>Personnages</InfoLabel>
+                          <InfoValue>
+                            {tbl.personnages === "creation" ? "✏️ Création à la table" : "🧾 Prétirés fournis"}
+                          </InfoValue>
+                        </InfoItem>
+                        <InfoItem>
+                          <InfoLabel>Public</InfoLabel>
+                          <InfoValue>
+                            {tbl.ageTag === "18" ? "18+ (contenu explicite)"
+                              : tbl.ageTag === "16" ? "16+ (thèmes matures)"
+                              : "Tous publics"}
+                          </InfoValue>
+                        </InfoItem>
+                        <InfoItem>
+                          <InfoLabel>Places</InfoLabel>
+                          <InfoValue>
+                            {dispoTbl <= 0 ? "Complet" : `${dispoTbl} restante${dispoTbl > 1 ? "s" : ""}`} / {tbl.placesMax}
+                          </InfoValue>
+                        </InfoItem>
+                      </>
+                    ) : (
+                      <>
+                        <InfoItem>
+                          <InfoLabel>Lieu</InfoLabel>
+                          <InfoValue>{venueAffichee.venue}</InfoValue>
+                        </InfoItem>
+                        <InfoItem>
+                          <InfoLabel>Places (toutes tables)</InfoLabel>
+                          <InfoValue>
+                            {dispoEv <= 0 ? "Complet" : `${dispoEv} restante${dispoEv > 1 ? "s" : ""}`} / {ev.places}
+                          </InfoValue>
+                        </InfoItem>
+                      </>
+                    )}
+                  </InfoGrid>
+                </div>
+
+                {/* Description */}
+                {tbl ? (
+                  <div>
+                    <DetailSectionLabel>Description de la table</DetailSectionLabel>
+                    <DetailText>{tbl.description || "Aucune description."}</DetailText>
+                  </div>
+                ) : (ev.accroche || ev.description) && (
+                  <div>
+                    <DetailSectionLabel>Description</DetailSectionLabel>
+                    {ev.accroche && <DetailText style={{ fontWeight: 600, color: "rgba(255,255,255,0.85)", marginBottom: ev.description ? "0.6rem" : 0 }}>{ev.accroche}</DetailText>}
+                    {ev.description && <DetailText>{ev.description}</DetailText>}
+                  </div>
+                )}
+
+                {/* MJ de la table */}
+                {tbl && (
+                  <div>
+                    <DetailSectionLabel>Maître de jeu</DetailSectionLabel>
+                    <MJCardBox>
+                      <MJAvatarCircle>{initiales(tbl.mjNom)}</MJAvatarCircle>
+                      <div>
+                        <MJCardName>{tbl.mjNom}</MJCardName>
+                        <MJCardSub>
+                          {contactPublic ? `✉️ ${tbl.mjContact}` : "Anime cette table"}
+                        </MJCardSub>
+                      </div>
+                    </MJCardBox>
+                  </div>
+                )}
+
+                {/* Programme (animation) */}
+                {!tbl && ev.programme && ev.programme.length > 0 && (
+                  <div>
+                    <DetailSectionLabel>Programme</DetailSectionLabel>
+                    <StepList>
+                      {ev.programme.map((p, i) => (
+                        <StepItem key={i}>
+                          <StepTime>{p.heure}</StepTime>
+                          <span>{p.titre}</span>
+                        </StepItem>
+                      ))}
+                    </StepList>
+                  </div>
+                )}
+
+                {/* Tables (animation) */}
+                {!tbl && (
+                  <div>
+                    <DetailSectionLabel>Tables proposées par les MJ</DetailSectionLabel>
+                    {loadingTables[ev.id] ? (
+                      <NoTablesMsg>Chargement des tables…</NoTablesMsg>
+                    ) : affichees.length === 0 ? (
+                      <NoTablesMsg>Aucune table proposée pour le moment.</NoTablesMsg>
+                    ) : (
+                      <TCGrid style={{ marginBottom: 0 }}>
+                        {affichees.map(t => {
+                          const pd = t.placesMax - (t.inscrits ?? 0);
+                          return (
+                            <TableSquare
+                              key={t.id}
+                              type="button"
+                              onClick={() => setDetail({ eventId: ev.id, tableId: t.id })}
+                              $image={squareThumb(t.image)}
+                              aria-label={`Voir la table ${t.systeme} de ${t.mjNom}`}
+                            >
+                              {!t.image && <SquareFallback>🎲</SquareFallback>}
+                              <SquareTop>
+                                <PlacesBadge $level={getPlacesLevel(pd)}>
+                                  {pd <= 0 ? "Complet" : `${pd} place${pd > 1 ? "s" : ""}`}
+                                </PlacesBadge>
+                                {t.ageTag && t.ageTag !== "tous" && (
+                                  <AgeTag $level={t.ageTag} style={{ marginLeft: 0 }}>{t.ageTag}+</AgeTag>
+                                )}
+                              </SquareTop>
+                              <SquareBottom>
+                                <SquareSysteme>{t.systeme}</SquareSysteme>
+                                <SquareMj>🧙 {t.mjNom}</SquareMj>
+                              </SquareBottom>
+                            </TableSquare>
+                          );
+                        })}
+                      </TCGrid>
+                    )}
+                  </div>
+                )}
+
+                {/* Lieu */}
+                {mapsSrc && (
+                  <div>
+                    <DetailSectionLabel>Lieu</DetailSectionLabel>
+                    <MapWrap>
+                      <iframe src={mapsSrc} title="Carte du lieu" loading="lazy" referrerPolicy="no-referrer-when-downgrade" />
+                      <MapCaption>📍 {venueAffichee.venue} — {lieuTxt}</MapCaption>
+                    </MapWrap>
+                  </div>
+                )}
+              </DetailBody>
+
+              <DetailFooter>
+                {monIns ? (
+                  <>
+                    <FooterNote>
+                      {inscritIci
+                        ? (tbl || monIns.tableId
+                            ? "✅ Vous êtes inscrit à cette table."
+                            : "✅ Vous êtes inscrit à cette animation.")
+                        : "Vous êtes déjà inscrit à une autre table de cette animation."}
+                    </FooterNote>
+                    {inscritIci && (
+                      <FooterDangerBtn onClick={() => setToCancel({ event: ev, table: tbl ?? tableInscrite })}>
+                        Se désinscrire
+                      </FooterDangerBtn>
+                    )}
+                  </>
+                ) : tbl && tbl.status !== "approved" ? (
+                  <FooterNote>
+                    {tbl.status === "rejected"
+                      ? "❌ Cette table n'a pas été retenue : les inscriptions sont fermées."
+                      : "⏳ Cette table est en attente de validation : les inscriptions ouvriront une fois validée."}
+                  </FooterNote>
+                ) : estMaTable ? (
+                  <FooterNote>🎭 C&apos;est votre table.</FooterNote>
+                ) : (
+                  <BigRegBtn $full={complet} onClick={() => openRegisterModal(ev, tbl)}>
+                    {!user
+                      ? "Se connecter pour s'inscrire"
+                      : complet
+                        ? "📋 Rejoindre la liste d'attente"
+                        : tbl ? "S'inscrire à cette table" : "S'inscrire à l'animation"}
+                  </BigRegBtn>
+                )}
+              </DetailFooter>
+            </DetailBox>
+          </DetailOverlay>
+        );
+      })()}
+
       {/* ── Modal inscription ── */}
       {selected && (
         <Overlay onClick={closeModal}>
           <Modal onClick={e => e.stopPropagation()}>
             {!success ? (
               <>
-                {tableModal ? (
+                <ModalTitle>
+                  {selected.table ? "S'inscrire à cette table" : "S'inscrire à l'animation"}
+                </ModalTitle>
+                <ModalSub>
+                  {formatJourComplet(selected.event.date)} · {selected.event.heure}
+                  {selected.event.duree ? ` · ${selected.event.duree}` : ""}
+                </ModalSub>
+
+                <DetailRow><strong>{selected.event.titre}</strong></DetailRow>
+
+                {selected.table && (
                   <>
-                    {tableModal.image && <ModalImage src={squareThumb(tableModal.image)} alt="" />}
-                    <ModalTitle>{tableModal.systeme}</ModalTitle>
-                    <ModalSub>
-                      🧙 {tableModal.mjNom} · {formatJourComplet(selected.event.date)} · {selected.event.heure}
-                    </ModalSub>
-                    <DetailTags>
-                      <PlacesBadge $level={getPlacesLevel(modalPlaces)}>
-                        {modalPlaces <= 0 ? "Complet" : `${modalPlaces} place${modalPlaces > 1 ? "s" : ""}`}
-                      </PlacesBadge>
-                      {tableModal.duree && (
-                        <DetailTag>⏱ {DUREE_LABELS[tableModal.duree] ?? tableModal.duree}</DetailTag>
-                      )}
-                      {tableModal.personnages && (
-                        <DetailTag>
-                          {tableModal.personnages === "pretires" ? "🧾 Prétirés fournis" : "✏️ Création à la table"}
-                        </DetailTag>
-                      )}
-                      {tableModal.ageTag && (
-                        <AgeTag $level={tableModal.ageTag} style={{ marginLeft: 0 }}>
-                          {tableModal.ageTag === "tous" ? "Tous publics" : `${tableModal.ageTag}+`}
-                        </AgeTag>
-                      )}
-                    </DetailTags>
-                    <DetailDesc>{tableModal.description}</DetailDesc>
-                    <ModalLink href={`/evenements/${slug}/${lieu}/${selected.event.id}/tables/${tableModal.id}`}>
-                      Voir la page complète de la table →
-                    </ModalLink>
-                  </>
-                ) : (
-                  <>
-                    <ModalTitle>S&apos;inscrire à l&apos;animation</ModalTitle>
-                    <ModalSub>
-                      {formatJourComplet(selected.event.date)} · {selected.event.heure}
-                    </ModalSub>
+                    <DetailRow>
+                      🧙 {selected.table.mjNom}
+                      {selected.table.systeme ? ` · ${selected.table.systeme}` : ""}
+                      {selected.table.ageTag && selected.table.ageTag !== "tous" ? ` · ${selected.table.ageTag}+` : ""}
+                    </DetailRow>
+                    <DetailRow>{selected.table.description}</DetailRow>
+                    <DetailRow>
+                      {selected.table.duree ? `⏱ ${selected.table.duree} · ` : ""}
+                      {selected.table.personnages === "creation" ? "✏️ Création à la table" : "🧾 Prétirés fournis"}
+                      {` · ${Math.max(0, selected.table.placesMax - (selected.table.inscrits ?? 0))} place(s) restante(s)`}
+                    </DetailRow>
                   </>
                 )}
+
                 <ModalActions>
-                  <CancelBtn onClick={closeModal}>Fermer</CancelBtn>
-                  <ConfirmBtn
-                    onClick={() => (user ? handleConfirmInscription() : allerSeConnecter())}
-                    disabled={submitting || authLoading}
-                  >
-                    {submitting
-                      ? "Envoi…"
-                      : !user
-                        ? "Se connecter pour s'inscrire"
-                        : modalPlaces <= 0
-                          ? "📋 Rejoindre la liste d'attente"
-                          : tableModal
-                            ? "S'inscrire à cette table"
-                            : "S'inscrire"}
+                  <CancelBtn onClick={closeModal}>Annuler</CancelBtn>
+                  <ConfirmBtn onClick={handleConfirmInscription} disabled={submitting}>
+                    {submitting ? "Envoi…" : "Confirmer"}
                   </ConfirmBtn>
                 </ModalActions>
               </>
