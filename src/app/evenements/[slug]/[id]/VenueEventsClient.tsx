@@ -239,11 +239,10 @@ const EventCard = styled.div<{ $isNext?: boolean }>`
   transition: border-color 150ms;
 `;
 
-// Zone haute de la carte : cliquable pour déplier / replier les tables
+// position: relative → le lien « Voir les détails » s'étire sur toute cette zone
 const CardTop = styled.div`
   position: relative;
   padding: 1.25rem 1.4rem;
-  cursor: pointer;
 `;
 
 const NextTag = styled.div`
@@ -360,18 +359,18 @@ const EventActions = styled.div`
   margin-top: 1rem;
 `;
 
-// Bouton d'inscription directe (plus un lien)
-const DetailBtn = styled.button`
+// Lien vers la page de l'animation (détails propres) : s'étire sur toute
+// la zone haute de la carte, donc toute la carte est cliquable
+const DetailBtn = styled(Link)`
   padding: 0.55rem 1rem;
   border-radius: 8px;
   font-size: 0.82rem;
   font-weight: 700;
   color: #fff;
-  cursor: pointer;
+  text-decoration: none;
   background: rgba(120,80,255,0.35);
   border: 1px solid rgba(160,120,255,0.6);
-  position: relative;
-  z-index: 1;
+  &::after { content: ""; position: absolute; inset: 0; }
   &:hover { background: rgba(120,80,255,0.5); }
   &:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 `;
@@ -464,7 +463,7 @@ const TCGrid = styled.div`
   margin-bottom: 1.1rem;
 `;
 
-// Tuile cliquable : ouvre la modale d'inscription à la table (plus de lien)
+// Tuile cliquable : ouvre la fiche détaillée de la table
 const TableSquare = styled.button<{ $image?: string }>`
   position: relative;
   display: block;
@@ -835,8 +834,6 @@ const SuccessMsg = styled.div`
   font-size: 0.95rem;
 `;
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
 // ── Fiche détaillée (animation ou table) ──────────────────────────────────
 
 const DetailOverlay = styled.div`
@@ -1125,6 +1122,8 @@ const TablesStrip = styled.div`
   padding: 0 1.4rem 1.25rem;
 `;
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
 const JOURS = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"];
 const MOIS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
 
@@ -1153,6 +1152,14 @@ function squareThumb(url?: string): string | undefined {
     ? url.replace("/upload/", "/upload/c_fill,w_400,h_400,q_auto,f_auto/")
     : url;
 }
+
+const DUREE_LABELS: Record<string, string> = {
+  "1-2h": "1h – 2h",
+  "2-3h": "2h – 3h",
+  "3-4h": "3h – 4h",
+  "4-6h": "4h – 6h",
+  "journee": "Journée complète",
+};
 
 const TABLE_FORM_VIDE = {
   systeme: "",
@@ -1362,12 +1369,59 @@ export default function VenueEventsClient({
     chargerDonnees(eventId);
   }
 
+  // Clic sur une tuile de table : ouvre directement l'inscription.
+  // Cas particuliers (table non validée, organisateur, MJ de la table) : on ouvre
+  // la fiche pour afficher la raison au lieu de ne rien faire.
+  function ouvrirTable(event: EventDoc, table: TableMJ) {
+    if (table.status !== "approved" || raisonBlocage(event, table)) {
+      openDetail(event.id, table.id);
+      return;
+    }
+    openRegisterModal(event, table);
+  }
+
+  // Clic sur une table dans la fiche détaillée : inscription immédiate.
+  // Cas particuliers (non connecté, table non validée, organisateur, MJ de la table).
+  function inscrireDirect(event: EventDoc, table: TableMJ) {
+    if (authLoading || submitting) return;
+    if (!user) {
+      allerSeConnecter();
+      return;
+    }
+    if (table.status !== "approved" || raisonBlocage(event, table)) {
+      openDetail(event.id, table.id);
+      return;
+    }
+    // La fenêtre s'ouvre en « Envoi… » puis affiche « Inscription confirmée ! »
+    // (ou « liste d'attente » si la table est complète)
+    setSelected({ event, table });
+    handleConfirmInscription({ event, table });
+  }
+
+  // L'organisateur (MJ référent) ne s'inscrit pas comme joueur à son animation,
+  // et un MJ ne s'inscrit pas à sa propre table. Renvoie le message à afficher.
+  function raisonBlocage(event: EventDoc, table: TableMJ | null): string | null {
+    if (!user) return null;
+    if (event.mjId === user.uid) {
+      return "Vous organisez cette animation : l'inscription comme joueur est désactivée.";
+    }
+    if (table && table.mjId === user.uid) {
+      return "Vous êtes le MJ de cette table : vous ne pouvez pas vous y inscrire.";
+    }
+    return null;
+  }
+
+  function allerSeConnecter() {
+    window.location.href = `/login?redirect=${encodeURIComponent(window.location.pathname)}`;
+  }
+
   function openRegisterModal(event: EventDoc, table: TableMJ | null) {
     if (authLoading) return;
     if (!user) {
-      window.location.href = `/login?redirect=${encodeURIComponent(window.location.pathname)}`;
+      allerSeConnecter();
       return;
     }
+    if (raisonBlocage(event, table)) return;
     setSelected({ event, table });
   }
 
@@ -1377,9 +1431,15 @@ export default function VenueEventsClient({
     setWaitlisted(false);
   }
 
-  async function handleConfirmInscription() {
-    if (!selected || !user || !userProfile) return;
-    const { event, table } = selected;
+  async function handleConfirmInscription(cible?: { event: EventDoc; table: TableMJ | null }) {
+    const cibleFinale = cible ?? selected;
+    if (!cibleFinale || !user || !userProfile) return;
+    const { event, table } = cibleFinale;
+    if (raisonBlocage(event, table)) return;
+    if (table && table.status !== "approved") {
+      alert("Cette table n'est pas encore validée : les inscriptions sont fermées.");
+      return;
+    }
     setSubmitting(true);
     try {
       const dejaInscritSnap = await getDocs(
@@ -1476,7 +1536,7 @@ export default function VenueEventsClient({
       if (table) {
         setTablesParEvent(prev => ({
           ...prev,
-          [event.id]: prev[event.id].map(t =>
+          [event.id]: (prev[event.id] ?? []).map(t =>
             t.id === table.id && result.statut === "confirme"
               ? { ...t, inscrits: (t.inscrits ?? 0) + 1 }
               : t
@@ -1543,6 +1603,7 @@ export default function VenueEventsClient({
               table: table ? `${table.mjNom}${table.systeme ? ` - ${table.systeme}` : ""}` : null,
               statut: "confirme",
               promotionListeAttente: true,
+              lien: window.location.origin + (eventInfo?.lien || `/evenements/${slug}/${lieu}/${eventId}`),
             }),
           });
         } catch (err) {
@@ -2033,6 +2094,17 @@ export default function VenueEventsClient({
     image: undefined,
   };
 
+  // Table affichée dans la modale d'inscription (version à jour après une inscription)
+  const tableModal: TableMJ | null = selected?.table
+    ? (tablesParEvent[selected.event.id] ?? []).find(t => t.id === selected.table!.id) ?? selected.table
+    : null;
+  const modalPlaces = tableModal
+    ? tableModal.placesMax - (tableModal.inscrits ?? 0)
+    : selected
+      ? selected.event.places - (selected.event.inscrits ?? 0)
+      : 0;
+  const blocage = selected ? raisonBlocage(selected.event, tableModal) : null;
+
   const groupesParMois = events.reduce<{ mois: string; events: EventDoc[] }[]>((acc, e) => {
     const mois = formatMoisAnnee(e.date);
     const dernier = acc[acc.length - 1];
@@ -2088,10 +2160,11 @@ export default function VenueEventsClient({
                   const formOuvert = tableFormOpen[e.id] ?? false;
                   const formValues = tableForm[e.id] ?? TABLE_FORM_VIDE;
                   const busyTable = submittingTable[e.id] ?? false;
+                  const blocageEvent = raisonBlocage(e, null);
 
                   return (
                     <EventCard key={e.id} $isNext={estProchaine}>
-                      <CardTop onClick={() => openDetail(e.id, null)}>
+                      <CardTop>
                         {estProchaine && <NextTag>⭐ Prochaine séance</NextTag>}
                         <EventTopRow>
                           <EventInfo>
@@ -2121,9 +2194,7 @@ export default function VenueEventsClient({
                         )}
 
                         <EventActions>
-                          <DetailBtn
-                            onClick={(ev) => { ev.stopPropagation(); openDetail(e.id, null); }}
-                          >
+                          <DetailBtn href={e.lien || `/evenements/${slug}/${lieu}/${e.id}`}>
                             {level === "full" ? "Voir les détails, liste d'attente →" : "Voir les détails et s'inscrire →"}
                           </DetailBtn>
                           <ToggleBtn
@@ -2139,8 +2210,8 @@ export default function VenueEventsClient({
                         <TablesStrip>
                           <SubLabel>
                             {estReferent
-                              ? `Toutes les tables (${tables.length}) · cliquez pour voir le détail`
-                              : "Tables proposées · cliquez pour voir le détail et vous inscrire"}
+                              ? `Toutes les tables (${tables.length}) · cliquez pour vous inscrire`
+                              : "Tables proposées · cliquez sur une table pour vous inscrire"}
                           </SubLabel>
                           {tablesAffichees.length === 0 && (
                             <NoTablesMsg style={{ marginBottom: "0.6rem" }}>Aucune table pour le moment.</NoTablesMsg>
@@ -2152,9 +2223,9 @@ export default function VenueEventsClient({
                                 <TableSquare
                                   key={t.id}
                                   type="button"
-                                  onClick={() => openDetail(e.id, t.id)}
+                                  onClick={() => ouvrirTable(e, t)}
                                   $image={squareThumb(t.image)}
-                                  aria-label={`Voir la table ${t.systeme} de ${t.mjNom}`}
+                                  aria-label={`S'inscrire à la table ${t.systeme} de ${t.mjNom}`}
                                   title={t.description}
                                 >
                                   {!t.image && <SquareFallback>🎲</SquareFallback>}
@@ -2220,16 +2291,20 @@ export default function VenueEventsClient({
                               </SmallBtn>
                             </GeneralRegisterBox>
                           ) : (
-                            <>
-                              <GeneralRegisterBox>
-                                <GeneralRegisterText>
-                                  Pas de préférence de table ? Inscrivez-vous directement à l&apos;animation.
-                                </GeneralRegisterText>
-                                <SmallBtn onClick={(ev) => { ev.stopPropagation(); openRegisterModal(e, null); }}>
-                                  {!user ? "Se connecter" : level === "full" ? "📋 Liste d'attente" : "S'inscrire"}
-                                </SmallBtn>
-                              </GeneralRegisterBox>
-                            </>
+                            <GeneralRegisterBox>
+                              {blocageEvent ? (
+                                <GeneralRegisterText>🎙️ {blocageEvent}</GeneralRegisterText>
+                              ) : (
+                                <>
+                                  <GeneralRegisterText>
+                                    Pas de préférence de table ? Inscrivez-vous directement à l&apos;animation.
+                                  </GeneralRegisterText>
+                                  <SmallBtn onClick={(ev) => { ev.stopPropagation(); openRegisterModal(e, null); }}>
+                                    {!user ? "Se connecter" : level === "full" ? "📋 Liste d'attente" : "S'inscrire"}
+                                  </SmallBtn>
+                                </>
+                              )}
+                            </GeneralRegisterBox>
                           )}
 
                           {/* ── Bloc MJ : proposer / modifier sa table, inline ── */}
@@ -2607,7 +2682,7 @@ export default function VenueEventsClient({
         const dispoTbl = tbl ? tbl.placesMax - (tbl.inscrits ?? 0) : 0;
         const dispoAff = tbl ? dispoTbl : dispoEv;
         const complet = dispoAff <= 0;
-        const estMaTable = !!tbl && !!user && tbl.mjId === user.uid;
+        const blocageDetail = raisonBlocage(ev, tbl);
         const contactPublic = !!tbl && !!tbl.mjContactPublic && !!tbl.mjContact;
         const lieuTxt = venueAffichee.adresse && venueAffichee.adresse !== "Adresse à préciser" ? venueAffichee.adresse : "";
         const mapsSrc = lieuTxt ? `https://maps.google.com/maps?q=${encodeURIComponent(lieuTxt)}&output=embed` : "";
@@ -2616,7 +2691,7 @@ export default function VenueEventsClient({
         const heroImg = tbl ? tbl.image : venueAffichee.image;
         const tableInscrite = monIns?.tableId ? tablesEv.find(t => t.id === monIns.tableId) ?? null : null;
         const inscritIci = !!monIns && (!tbl || monIns.tableId === tbl.id);
-        const dureeLabel = (d?: string) => d === "journee" ? "Journée complète" : (d ?? "");
+        const dureeLabel = (d?: string) => (d ? DUREE_LABELS[d] ?? d : "");
 
         return (
           <DetailOverlay ref={detailRef} onClick={() => setDetail(null)}>
@@ -2754,7 +2829,7 @@ export default function VenueEventsClient({
                 {/* Tables (animation) */}
                 {!tbl && (
                   <div>
-                    <DetailSectionLabel>Tables proposées par les MJ</DetailSectionLabel>
+                    <DetailSectionLabel>Tables proposées · cliquez sur une table pour vous inscrire</DetailSectionLabel>
                     {loadingTables[ev.id] ? (
                       <NoTablesMsg>Chargement des tables…</NoTablesMsg>
                     ) : affichees.length === 0 ? (
@@ -2767,9 +2842,9 @@ export default function VenueEventsClient({
                             <TableSquare
                               key={t.id}
                               type="button"
-                              onClick={() => setDetail({ eventId: ev.id, tableId: t.id })}
+                              onClick={() => inscrireDirect(ev, t)}
                               $image={squareThumb(t.image)}
-                              aria-label={`Voir la table ${t.systeme} de ${t.mjNom}`}
+                              aria-label={`S'inscrire à la table ${t.systeme} de ${t.mjNom}`}
                             >
                               {!t.image && <SquareFallback>🎲</SquareFallback>}
                               <SquareTop>
@@ -2826,8 +2901,8 @@ export default function VenueEventsClient({
                       ? "❌ Cette table n'a pas été retenue : les inscriptions sont fermées."
                       : "⏳ Cette table est en attente de validation : les inscriptions ouvriront une fois validée."}
                   </FooterNote>
-                ) : estMaTable ? (
-                  <FooterNote>🎭 C&apos;est votre table.</FooterNote>
+                ) : blocageDetail ? (
+                  <FooterNote>🎙️ {blocageDetail}</FooterNote>
                 ) : (
                   <BigRegBtn $full={complet} onClick={() => openRegisterModal(ev, tbl)}>
                     {!user
@@ -2843,14 +2918,14 @@ export default function VenueEventsClient({
         );
       })()}
 
-      {/* ── Modal inscription ── */}
+      {/* ── Modal inscription (confirmation) ── */}
       {selected && (
         <Overlay onClick={closeModal}>
           <Modal onClick={e => e.stopPropagation()}>
             {!success ? (
               <>
                 <ModalTitle>
-                  {selected.table ? "S'inscrire à cette table" : "S'inscrire à l'animation"}
+                  {tableModal ? "S'inscrire à cette table" : "S'inscrire à l'animation"}
                 </ModalTitle>
                 <ModalSub>
                   {formatJourComplet(selected.event.date)} · {selected.event.heure}
@@ -2859,26 +2934,37 @@ export default function VenueEventsClient({
 
                 <DetailRow><strong>{selected.event.titre}</strong></DetailRow>
 
-                {selected.table && (
+                {tableModal && (
                   <>
                     <DetailRow>
-                      🧙 {selected.table.mjNom}
-                      {selected.table.systeme ? ` · ${selected.table.systeme}` : ""}
-                      {selected.table.ageTag && selected.table.ageTag !== "tous" ? ` · ${selected.table.ageTag}+` : ""}
+                      🧙 {tableModal.mjNom}
+                      {tableModal.systeme ? ` · ${tableModal.systeme}` : ""}
+                      {tableModal.ageTag && tableModal.ageTag !== "tous" ? ` · ${tableModal.ageTag}+` : ""}
                     </DetailRow>
-                    <DetailRow>{selected.table.description}</DetailRow>
+                    <DetailRow>{tableModal.description}</DetailRow>
                     <DetailRow>
-                      {selected.table.duree ? `⏱ ${selected.table.duree} · ` : ""}
-                      {selected.table.personnages === "creation" ? "✏️ Création à la table" : "🧾 Prétirés fournis"}
-                      {` · ${Math.max(0, selected.table.placesMax - (selected.table.inscrits ?? 0))} place(s) restante(s)`}
+                      {tableModal.duree ? `⏱ ${DUREE_LABELS[tableModal.duree] ?? tableModal.duree} · ` : ""}
+                      {tableModal.personnages === "creation" ? "✏️ Création à la table" : "🧾 Prétirés fournis"}
+                      {` · ${Math.max(0, modalPlaces)} place(s) restante(s)`}
                     </DetailRow>
                   </>
                 )}
 
+                {modalPlaces <= 0 && !blocage && (
+                  <DetailRow>📋 Il n&apos;y a plus de place : vous serez placé en liste d&apos;attente.</DetailRow>
+                )}
+                {blocage && <MyTableStatus $status="pending">🎙️ {blocage}</MyTableStatus>}
+
                 <ModalActions>
                   <CancelBtn onClick={closeModal}>Annuler</CancelBtn>
-                  <ConfirmBtn onClick={handleConfirmInscription} disabled={submitting}>
-                    {submitting ? "Envoi…" : "Confirmer"}
+                  <ConfirmBtn onClick={() => handleConfirmInscription()} disabled={submitting || authLoading || !!blocage}>
+                    {submitting
+                      ? "Envoi…"
+                      : blocage
+                        ? "Inscription indisponible"
+                        : modalPlaces <= 0
+                          ? "📋 Rejoindre la liste d'attente"
+                          : "Confirmer"}
                   </ConfirmBtn>
                 </ModalActions>
               </>
